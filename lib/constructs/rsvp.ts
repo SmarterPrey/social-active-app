@@ -17,7 +17,7 @@ import { NagSuppressions } from "cdk-nag";
 export interface RsvpProps {
   /** Verified SES "from" address used for invites. */
   fromAddress: string;
-  /** Public base URL (e.g. https://app.example.com) — RSVP links are built off this. */
+  /** Public base URL (e.g. https://app.mucker.io) — RSVP links are built off this. */
   rsvpBaseUrl: string;
   removalPolicy?: RemovalPolicy;
 }

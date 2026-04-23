@@ -25,7 +25,7 @@ export interface CognitoProps {
   refreshTokenValidity?: Duration;
   /**
    * Absolute URL of the web app's sign-in page.
-   * Used in the invitation email link (e.g. https://app.example.com/signin).
+   * Used in the invitation email link (e.g. https://app.mucker.io/signin).
    */
   appSignInUrl?: string;
   /**
@@ -61,7 +61,7 @@ export class Cognito extends Construct {
     if (!props.userName) props.userName = props.adminEmail.split("@")[0];
 
     // Fallback sign-in URL. Callers should override via `appSignInUrl`.
-    const signInUrl = props.appSignInUrl ?? "https://app.example.com/signin";
+    const signInUrl = props.appSignInUrl ?? "https://app.mucker.io/signin";
     const inviteHtml = renderInviteEmailHtml(signInUrl);
     const inviteSms = `Social Active App: welcome {username}. Temporary password: {####}. Sign in at ${signInUrl} to set your own password.`;
     const inviteSubject = "You're invited to Social Active App";

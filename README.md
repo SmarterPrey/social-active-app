@@ -103,7 +103,7 @@ npm run generateEnv
 npm run deployFrontend -- --all --profile <YOUR_AWS_PROFILE>
 ```
 
-The frontend URL is printed as `socialActiveApp-WebappStack.webappurl…`.
+The frontend URL is printed as `socialActiveApp-WebappStack.webappurl…` and will ultimately resolve at `app.mucker.io`.
 
 ## Bulk loading initial graph data
 

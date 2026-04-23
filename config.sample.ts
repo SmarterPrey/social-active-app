@@ -14,7 +14,7 @@ const baseConfig = {
    */
   email: {
     fromAddress: "no-reply@example.com",
-    fromName: "Social Active App",
+    fromName: "Mucker",
     replyTo: "info@example.com",
   },
   adminEmail: "your_email@example.com",
