@@ -1,0 +1,268 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.github/workflows/**'
+  workflow_dispatch:
+    inputs:
+      deploy-target:
+        description: 'What to deploy'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - backend
+          - frontend
+
+# Prevent concurrent deploys to the same target
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+  CDK_DEFAULT_REGION: us-east-1
+  NODE_VERSION: '20'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Determine which stacks need deploying
+  # ---------------------------------------------------------------------------
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      deploy-backend: ${{ steps.decide.outputs.deploy-backend }}
+      deploy-frontend: ${{ steps.decide.outputs.deploy-frontend }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Determine deploy targets
+        id: decide
+        run: |
+          # Manual dispatch — use the selected target
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TARGET="${{ inputs.deploy-target }}"
+            case "$TARGET" in
+              all)      echo "deploy-backend=true"  >> $GITHUB_OUTPUT
+                        echo "deploy-frontend=true" >> $GITHUB_OUTPUT ;;
+              backend)  echo "deploy-backend=true"  >> $GITHUB_OUTPUT
+                        echo "deploy-frontend=false" >> $GITHUB_OUTPUT ;;
+              frontend) echo "deploy-backend=false"  >> $GITHUB_OUTPUT
+                        echo "deploy-frontend=true" >> $GITHUB_OUTPUT ;;
+            esac
+            exit 0
+          fi
+
+          # Push — detect changed paths
+          BACKEND=false
+          FRONTEND=false
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+
+          # Exclude markdown files from change detection
+          CHANGED=$(echo "$CHANGED" | grep -v '\.md$' || echo "")
+
+          # Backend paths: CDK infra, API, Lambda, lib, bin, config, data
+          if echo "$CHANGED" | grep -qE '^(lib/|bin/|api/|data/|config\.|cdk\.|nag/|package\.json|tsconfig\.json)'; then
+            BACKEND=true
+          fi
+
+          # Frontend paths: app/web, frontend CDK constructs
+          if echo "$CHANGED" | grep -qE '^(app/web/|lib/webapp-stack|lib/constructs/web\.)'; then
+            FRONTEND=true
+          fi
+
+          # Workflow files are excluded — no deploy trigger for .github/workflows/
+
+          # Safety: if nothing matched, deploy everything
+          if [[ "$BACKEND" == "false" && "$FRONTEND" == "false" ]]; then
+            BACKEND=true
+            FRONTEND=true
+          fi
+
+          echo "deploy-backend=$BACKEND"   >> $GITHUB_OUTPUT
+          echo "deploy-frontend=$FRONTEND" >> $GITHUB_OUTPUT
+
+          echo "### Change Detection" >> $GITHUB_STEP_SUMMARY
+          echo "- Deploy backend: **$BACKEND**" >> $GITHUB_STEP_SUMMARY
+          echo "- Deploy frontend: **$FRONTEND**" >> $GITHUB_STEP_SUMMARY
+
+  # ---------------------------------------------------------------------------
+  # Backend
+  # ---------------------------------------------------------------------------
+  deploy-backend:
+    name: Deploy Backend Infrastructure
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.deploy-backend == 'true'
+    outputs:
+      completed: ${{ steps.deploy.outputs.completed }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy backend stacks
+        id: deploy
+        run: |
+          npm run deployBackend -- --all
+          echo "completed=true" >> $GITHUB_OUTPUT
+
+      - name: Upload backend outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-infra-outputs
+          path: cdk-infra.json
+          retention-days: 1
+
+      - name: Display backend outputs
+        run: |
+          echo "Backend deployment completed!"
+          if [ -f cdk-infra.json ]; then
+            cat cdk-infra.json | jq '.'
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Frontend
+  # ---------------------------------------------------------------------------
+  deploy-frontend:
+    name: Deploy Frontend Application
+    runs-on: ubuntu-latest
+    needs: [detect-changes, deploy-backend]
+    # Run if frontend is requested AND (backend succeeded OR was skipped)
+    if: |
+      always() &&
+      needs.detect-changes.outputs.deploy-frontend == 'true' &&
+      (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get backend outputs
+        run: |
+          # Try artifact first (from this run), fall back to fetching from AWS
+          echo "Attempting to use cdk-infra.json..."
+          if [ ! -f cdk-infra.json ]; then
+            echo "No local artifact — fetching outputs from CloudFormation..."
+            # Build a minimal cdk-infra.json from live stack outputs
+            aws cloudformation describe-stacks --region ${{ env.AWS_REGION }} \
+              --query 'Stacks[?starts_with(StackName, `socialActiveApp-`)].{StackName: StackName, Outputs: Outputs}' \
+              --output json > cdk-infra-raw.json
+            node -e "
+              const raw = require('./cdk-infra-raw.json');
+              const out = {};
+              for (const stack of raw) {
+                const o = {};
+                for (const kv of (stack.Outputs || [])) o[kv.OutputKey] = kv.OutputValue;
+                out[stack.StackName] = o;
+              }
+              require('fs').writeFileSync('cdk-infra.json', JSON.stringify(out, null, 2));
+            "
+          fi
+
+      - name: Download backend outputs (if available)
+        uses: actions/download-artifact@v4
+        with:
+          name: cdk-infra-outputs
+        continue-on-error: true
+
+      - name: Generate frontend environment variables
+        run: npm run generateEnv
+
+      - name: Deploy frontend stack
+        run: npm run deployFrontend -- --all
+
+      - name: Extract and display outputs
+        id: outputs
+        run: |
+          CLOUDFRONT_URL=$(aws cloudformation describe-stacks \
+            --stack-name socialActiveApp-WebappStack \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`webappurl4CF7BBD7`].OutputValue' \
+            --output text 2>/dev/null || echo "N/A")
+
+          echo "cloudfront-url=$CLOUDFRONT_URL" >> $GITHUB_OUTPUT
+          echo "CloudFront URL: https://$CLOUDFRONT_URL"
+
+  # ---------------------------------------------------------------------------
+  # Summary (always runs)
+  # ---------------------------------------------------------------------------
+  summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [detect-changes, deploy-backend, deploy-frontend]
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## Deployment Summary :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          BACKEND_STATUS="${{ needs.deploy-backend.result }}"
+          FRONTEND_STATUS="${{ needs.deploy-frontend.result }}"
+
+          case "$BACKEND_STATUS" in
+            success) echo "| Backend  | :white_check_mark: Deployed |" >> $GITHUB_STEP_SUMMARY ;;
+            skipped) echo "| Backend  | :fast_forward: Skipped (no changes) |" >> $GITHUB_STEP_SUMMARY ;;
+            *)       echo "| Backend  | :x: $BACKEND_STATUS |" >> $GITHUB_STEP_SUMMARY ;;
+          esac
+
+          case "$FRONTEND_STATUS" in
+            success) echo "| Frontend | :white_check_mark: Deployed |" >> $GITHUB_STEP_SUMMARY ;;
+            skipped) echo "| Frontend | :fast_forward: Skipped (no changes) |" >> $GITHUB_STEP_SUMMARY ;;
+            *)       echo "| Frontend | :x: $FRONTEND_STATUS |" >> $GITHUB_STEP_SUMMARY ;;
+          esac
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **AWS Account**: ${{ env.AWS_ACCOUNT_ID }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY

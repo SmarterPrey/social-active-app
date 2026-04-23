@@ -1,0 +1,41 @@
+{
+  "name": "social-active-app",
+  "version": "0.1.0",
+  "type": "commonjs",
+  "bin": {
+    "social-active-app": "bin/backend.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "cdk": "cdk",
+    "generateEnv": "node generateEnv.mjs",
+    "deployBackend": "cdk deploy --app \"node -e \\\"require('./bin/backend.js')\\\"\" -O cdk-infra.json --require-approval never",
+    "deployFrontend": "cdk deploy --app \"node -e \\\"require('./bin/frontend.js')\\\"\" --require-approval never",
+    "destroyBackend": "cdk destroy --app \"node -e \\\"require('./bin/backend.js')\\\"\"",
+    "destroyFrontend": "cdk destroy --app \"node -e \\\"require('./bin/frontend.js')\\\"\""
+  },
+  "devDependencies": {
+    "@aws-sdk/client-ec2": "^3.1024.0",
+    "@types/aws-lambda": "^8.10.161",
+    "@types/jest": "^29.5.12",
+    "@types/lodash": "^4.17.24",
+    "@types/node": "20.12.7",
+    "aws-cdk": "^2.1117.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.4.5"
+  },
+  "dependencies": {
+    "@aws-cdk/aws-neptune-alpha": "^2.248.0-alpha.0",
+    "aws-cdk-lib": "^2.248.0",
+    "cdk-nag": "^2.28.100",
+    "constructs": "^10.0.0",
+    "esbuild": "^0.25.0",
+    "lodash": "^4.17.23",
+    "pnpm": "^10.28.2",
+    "source-map-support": "^0.5.21"
+  }
+}

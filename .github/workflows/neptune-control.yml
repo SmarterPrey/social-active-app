@@ -1,0 +1,213 @@
+name: Neptune Cluster Control
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - stop
+          - start
+          - status
+      target:
+        description: 'Resource to control'
+        required: true
+        type: choice
+        options:
+          - neptune
+          - bastion
+          - both
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+jobs:
+  neptune-control:
+    name: "${{ inputs.action }} Neptune cluster"
+    if: inputs.target == 'neptune' || inputs.target == 'both'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Lambda function name
+        id: lambda
+        run: |
+          FN_NAME=$(aws lambda list-functions \
+            --query "Functions[?contains(FunctionName, 'neptunescheduler')].FunctionName" \
+            --output text --region ${{ env.AWS_REGION }})
+
+          if [ -z "$FN_NAME" ]; then
+            echo "::error::Neptune scheduler Lambda not found"
+            exit 1
+          fi
+          echo "function-name=$FN_NAME" >> $GITHUB_OUTPUT
+          echo "Found Lambda: $FN_NAME"
+
+      - name: Get current cluster status
+        id: before-status
+        run: |
+          STATUS=$(aws neptune describe-db-clusters \
+            --query "DBClusters[0].Status" \
+            --output text --region ${{ env.AWS_REGION }})
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "Current cluster status: **$STATUS**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Invoke scheduler Lambda
+        if: inputs.action != 'status'
+        id: invoke
+        run: |
+          echo "Invoking Lambda with action: ${{ inputs.action }}"
+
+          RESPONSE=$(aws lambda invoke \
+            --function-name ${{ steps.lambda.outputs.function-name }} \
+            --payload '{"action":"${{ inputs.action }}"}' \
+            --cli-binary-format raw-in-base64-out \
+            --region ${{ env.AWS_REGION }} \
+            --output text \
+            --query 'StatusCode' \
+            /tmp/response.json)
+
+          echo "Lambda status code: $RESPONSE"
+          echo "Lambda response:"
+          cat /tmp/response.json
+          echo ""
+
+          if [ "$RESPONSE" != "200" ]; then
+            echo "::error::Lambda invocation failed with status $RESPONSE"
+            cat /tmp/response.json
+            exit 1
+          fi
+
+      - name: Wait for status change
+        if: inputs.action != 'status'
+        run: |
+          echo "Waiting for cluster to begin transitioning..."
+          for i in $(seq 1 12); do
+            STATUS=$(aws neptune describe-db-clusters \
+              --query "DBClusters[0].Status" \
+              --output text --region ${{ env.AWS_REGION }})
+            echo "  [$i/12] Status: $STATUS"
+
+            if [[ "${{ inputs.action }}" == "stop" && "$STATUS" =~ ^(stopping|stopped)$ ]]; then
+              echo "Cluster is $STATUS"
+              break
+            elif [[ "${{ inputs.action }}" == "start" && "$STATUS" =~ ^(starting|available)$ ]]; then
+              echo "Cluster is $STATUS"
+              break
+            fi
+            sleep 10
+          done
+
+      - name: Summary
+        run: |
+          STATUS=$(aws neptune describe-db-clusters \
+            --query "DBClusters[0].Status" \
+            --output text --region ${{ env.AWS_REGION }})
+
+          CLUSTER_ID=$(aws neptune describe-db-clusters \
+            --query "DBClusters[0].DBClusterIdentifier" \
+            --output text --region ${{ env.AWS_REGION }})
+
+          echo "## Neptune Cluster Control" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Action** | \`${{ inputs.action }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cluster** | \`$CLUSTER_ID\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Before** | \`${{ steps.before-status.outputs.status }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Current** | \`$STATUS\` |" >> $GITHUB_STEP_SUMMARY
+
+  bastion-control:
+    name: "${{ inputs.action }} Bastion instance"
+    if: inputs.target == 'bastion' || inputs.target == 'both'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get bastion instance ID from SSM
+        id: ssm
+        run: |
+          INSTANCE_ID=$(aws ssm get-parameter \
+            --name /socialActiveApp/bastion/instance-id \
+            --query "Parameter.Value" \
+            --output text --region ${{ env.AWS_REGION }})
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "::error::Bastion instance ID not found in SSM parameter /socialActiveApp/bastion/instance-id"
+            exit 1
+          fi
+          echo "instance-id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "Bastion instance ID from SSM: $INSTANCE_ID"
+
+      - name: Get current bastion status
+        id: before-status
+        run: |
+          STATUS=$(aws ec2 describe-instances \
+            --instance-ids ${{ steps.ssm.outputs.instance-id }} \
+            --query "Reservations[0].Instances[0].State.Name" \
+            --output text --region ${{ env.AWS_REGION }})
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "Current bastion status: **$STATUS**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Stop bastion
+        if: inputs.action == 'stop'
+        run: |
+          echo "Stopping bastion instance ${{ steps.ssm.outputs.instance-id }}"
+          aws ec2 stop-instances \
+            --instance-ids ${{ steps.ssm.outputs.instance-id }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Start bastion
+        if: inputs.action == 'start'
+        run: |
+          echo "Starting bastion instance ${{ steps.ssm.outputs.instance-id }}"
+          aws ec2 start-instances \
+            --instance-ids ${{ steps.ssm.outputs.instance-id }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for status change
+        if: inputs.action != 'status'
+        run: |
+          echo "Waiting for bastion to transition..."
+          if [[ "${{ inputs.action }}" == "stop" ]]; then
+            aws ec2 wait instance-stopped \
+              --instance-ids ${{ steps.ssm.outputs.instance-id }} \
+              --region ${{ env.AWS_REGION }}
+          elif [[ "${{ inputs.action }}" == "start" ]]; then
+            aws ec2 wait instance-running \
+              --instance-ids ${{ steps.ssm.outputs.instance-id }} \
+              --region ${{ env.AWS_REGION }}
+          fi
+          echo "Done."
+
+      - name: Summary
+        run: |
+          STATUS=$(aws ec2 describe-instances \
+            --instance-ids ${{ steps.ssm.outputs.instance-id }} \
+            --query "Reservations[0].Instances[0].State.Name" \
+            --output text --region ${{ env.AWS_REGION }})
+
+          echo "## Bastion Instance Control" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Action** | \`${{ inputs.action }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Instance** | \`${{ steps.ssm.outputs.instance-id }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Before** | \`${{ steps.before-status.outputs.status }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Current** | \`$STATUS\` |" >> $GITHUB_STEP_SUMMARY

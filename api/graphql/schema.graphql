@@ -1,0 +1,429 @@
+type RelationName {
+  name: String!
+}
+
+type Profile {
+  search_name: String
+  usage: String
+  belong_to: String
+  authored_by: String
+  affiliated_with: String
+  people: String
+  made_by: String
+}
+
+type InsertDataResult {
+  result: String
+}
+
+type InviteMemberResult @aws_cognito_user_pools {
+  email: String!
+  username: String!
+  status: String!
+}
+type Graph {
+  nodes: [Nodes]
+  links: [Links]
+}
+
+type Nodes {
+  id: String
+  label: String
+}
+
+type Links {
+  source: String
+  target: String
+  value: String
+}
+
+type AiResponse {
+  answer: String
+  query: String
+  data: String
+}
+
+type EntityProperty {
+  key: String!
+  value: String!
+}
+
+type EdgeRelation {
+  edgeLabel: String!
+  direction: String!
+  targetLabel: String!
+  targetName: String!
+}
+
+type SearchResult {
+  id: String!
+  name: String!
+  label: String!
+  entityType: String
+}
+
+type ProjectData {
+  id: String!
+  projectName: String!
+  DepartmentNumber: String
+  DataClassification: String
+  Team: String
+  OwnerGroup: String
+  Recovery: String
+  Tier: String
+}
+
+type Account {
+  id: String!
+  Account_Name: String!
+  Account_Id: String!
+  Cloud: String!
+  Environments: String!
+}
+
+############################### Inputs ###############################
+input InsertDataInput {
+  value: String!
+  name: String
+  edge: String
+  vertex: String
+  property: String
+  source: String
+  sourceLabel: String
+  destination: String
+  destLabel: String
+  properties: String
+}
+
+############################### Queries ###############################
+type Query {
+  getRelationName(type: String!, name: String!, value: String!): [RelationName]
+    @aws_cognito_user_pools
+  getProfile(type: String!, name: String!, value: String!): [Profile]
+    @aws_cognito_user_pools
+  getGraph(type: String!, value: String!): Graph @aws_cognito_user_pools
+  askGraph(question: String!, history: String): AiResponse
+    @aws_cognito_user_pools
+  searchEntities(vertexType: String!, searchValue: String): [SearchResult]
+    @aws_cognito_user_pools
+  searchProjects(searchValue: String): [ProjectData] @aws_cognito_user_pools
+  getEntityProperties(vertexType: String!, searchValue: String, vertexId: String): [EntityProperty]
+    @aws_cognito_user_pools
+  getEntityEdges(vertexType: String!, searchValue: String, vertexId: String): [EdgeRelation]
+    @aws_cognito_user_pools
+  getProjectAccounts(projectName: String!): [Account]
+    @aws_cognito_user_pools
+
+  ############################### Member networking ###############################
+  listFeed(limit: Int, cursor: String): FeedPage
+    @aws_cognito_user_pools
+  getPost(id: ID!): FeedItem
+    @aws_cognito_user_pools
+  listEvents(status: EventStatus!): [Event!]!
+    @aws_cognito_user_pools
+  getEvent(id: ID!): Event
+    @aws_cognito_user_pools
+  listVendors: [Vendor!]!
+    @aws_cognito_user_pools
+  getVendor(id: ID!): Vendor
+    @aws_cognito_user_pools
+  listMembers(search: String): [Member!]!
+    @aws_cognito_user_pools
+  getMember(id: ID!): Member
+    @aws_cognito_user_pools
+  # Public — API-key scope; token is HMAC-verified in resolver
+  getRsvpByToken(token: String!): RsvpContext
+    @aws_api_key
+}
+input AddAccountInput {
+  projectName: String!
+  Account_Name: String!
+  Account_Id: String!
+  Cloud: String!
+  Environments: String!
+}
+
+############################### Mutations ###############################
+type Mutation {
+  insertData(input: InsertDataInput!): InsertDataResult
+    @aws_auth(cognito_groups: ["Admin", "Editor"])
+  addProjectAccount(input: AddAccountInput!): Account
+    @aws_auth(cognito_groups: ["Admin", "Editor"])
+  deleteProjectAccount(accountId: String!): InsertDataResult
+    @aws_auth(cognito_groups: ["Admin"])
+
+  ############################### Member networking ###############################
+  createPost(body: String!): FeedItem
+    @aws_cognito_user_pools
+  createComment(input: CreateCommentInput!): Comment
+    @aws_cognito_user_pools
+  toggleLike(postId: ID!): LikeResult
+    @aws_cognito_user_pools
+  submitFeedback(input: SubmitFeedbackInput!): Feedback
+    @aws_cognito_user_pools
+  requestConnection(targetMemberId: ID!): ConnectionResult
+    @aws_cognito_user_pools
+  respondToConnection(requesterId: ID!, accept: Boolean!): ConnectionResult
+    @aws_cognito_user_pools
+  updateMemberProfile(input: UpdateMemberProfileInput!): Member
+    @aws_cognito_user_pools
+
+  # Admin-only event + vendor CRUD
+  createEvent(input: CreateEventInput!): Event
+    @aws_auth(cognito_groups: ["Admin"])
+  updateEvent(input: UpdateEventInput!): Event
+    @aws_auth(cognito_groups: ["Admin"])
+  requestEventVideoUpload(eventId: ID!, contentType: String!): PresignedUpload
+    @aws_auth(cognito_groups: ["Admin"])
+  attachEventVideo(eventId: ID!, key: String!): Event
+    @aws_auth(cognito_groups: ["Admin"])
+  sendEventRsvpEmails(eventId: ID!): EmailDispatchResult
+    @aws_auth(cognito_groups: ["Admin"])
+  createVendor(input: CreateVendorInput!): Vendor
+    @aws_auth(cognito_groups: ["Admin"])
+  updateVendor(input: UpdateVendorInput!): Vendor
+    @aws_auth(cognito_groups: ["Admin"])
+  # Invite a new member. Creates the Cognito user, which triggers the
+  # Cognito-native invitation email containing a temporary password and a
+  # sign-in link. Admin or MembershipAdmin only.
+  inviteMember(name: String!, email: String!, note: String): InviteMemberResult
+    @aws_auth(cognito_groups: ["Admin", "MembershipAdmin"])
+
+  # Public — token verified inside the resolver
+  submitRsvp(token: String!, attending: Boolean!, guests: Int!): Rsvp
+    @aws_api_key
+}
+
+############################### Member networking types ###############################
+enum EventStatus {
+  upcoming
+  past
+}
+
+enum FeedItemKind {
+  member_post
+  system_new_vendor
+  system_new_event_video
+}
+
+enum VendorContactRole {
+  sales
+  technical_sales
+}
+
+enum RsvpStatus {
+  yes
+  no
+  pending
+}
+
+enum ConnectionStatus {
+  none
+  pending_outgoing
+  pending_incoming
+  connected
+}
+
+type Member @aws_cognito_user_pools @aws_api_key {
+  id: ID!
+  name: String!
+  title: String
+  company: String
+  bio: String
+  avatarUrl: String
+  email: String
+  phone: String
+  connectionStatus: ConnectionStatus
+}
+
+type VendorContact @aws_cognito_user_pools {
+  id: ID!
+  name: String!
+  role: VendorContactRole!
+  email: String!
+  phone: String
+}
+
+type Vendor @aws_cognito_user_pools {
+  id: ID!
+  name: String!
+  tagline: String
+  description: String
+  logoUrl: String
+  website: String
+  tags: [String!]!
+  presentationVideoUrl: String
+  contacts: [VendorContact!]!
+  comments: [Comment!]
+  createdAt: AWSDateTime!
+}
+
+type EventVendorRef @aws_cognito_user_pools @aws_api_key {
+  id: ID!
+  name: String!
+  tagline: String
+  logoUrl: String
+}
+
+type Event @aws_cognito_user_pools @aws_api_key {
+  id: ID!
+  title: String!
+  description: String
+  startsAt: AWSDateTime!
+  endsAt: AWSDateTime
+  venue: String!
+  city: String
+  status: EventStatus!
+  rsvpCount: Int!
+  guestCount: Int!
+  videoUrl: String
+  vendors: [EventVendorRef!]!
+  comments: [Comment!]
+  createdAt: AWSDateTime!
+}
+
+type Comment @aws_cognito_user_pools {
+  id: ID!
+  authorId: ID!
+  authorName: String!
+  authorAvatarUrl: String
+  body: String!
+  createdAt: AWSDateTime!
+}
+
+type FeedItem @aws_cognito_user_pools {
+  id: ID!
+  kind: FeedItemKind!
+  authorId: ID
+  authorName: String
+  authorAvatarUrl: String
+  body: String!
+  createdAt: AWSDateTime!
+  commentCount: Int!
+  likeCount: Int!
+  likedByMe: Boolean!
+  linkedVendorId: ID
+  linkedEventId: ID
+  comments: [Comment!]
+}
+
+type FeedPage @aws_cognito_user_pools {
+  items: [FeedItem!]!
+  nextCursor: String
+}
+
+type LikeResult @aws_cognito_user_pools {
+  id: ID!
+  likeCount: Int!
+  likedByMe: Boolean!
+}
+
+type Feedback @aws_cognito_user_pools {
+  id: ID!
+}
+
+type ConnectionResult @aws_cognito_user_pools {
+  targetMemberId: ID!
+  connectionStatus: ConnectionStatus!
+}
+
+type PresignedUpload @aws_auth(cognito_groups: ["Admin"]) {
+  uploadUrl: String!
+  key: String!
+}
+
+type EmailDispatchResult @aws_auth(cognito_groups: ["Admin"]) {
+  sent: Int!
+  skipped: Int!
+}
+
+type Rsvp @aws_api_key @aws_cognito_user_pools {
+  id: ID!
+  eventId: ID!
+  memberId: ID!
+  status: RsvpStatus!
+  guests: Int!
+}
+
+type RsvpContext @aws_api_key {
+  event: Event!
+  member: Member!
+  rsvp: Rsvp!
+}
+
+############################### Member networking inputs ###############################
+input CreateCommentInput {
+  targetType: String!   # "post" | "event" | "vendor"
+  targetId: ID!
+  body: String!
+}
+
+input SubmitFeedbackInput {
+  eventId: ID!
+  rating: Int!
+  comment: String
+  vendorApprovals: [VendorApprovalInput!]
+}
+
+input VendorApprovalInput {
+  vendorId: ID!
+  approved: Boolean!
+}
+
+input UpdateMemberProfileInput {
+  name: String
+  title: String
+  company: String
+  bio: String
+  phone: String
+}
+
+input CreateEventInput {
+  title: String!
+  description: String!
+  startsAt: AWSDateTime!
+  endsAt: AWSDateTime
+  venue: String!
+  city: String
+  vendorIds: [ID!]!
+  sendInvitesNow: Boolean
+}
+
+input UpdateEventInput {
+  id: ID!
+  title: String
+  description: String
+  startsAt: AWSDateTime
+  endsAt: AWSDateTime
+  venue: String
+  city: String
+  vendorIds: [ID!]
+}
+
+input VendorContactInput {
+  name: String!
+  role: VendorContactRole!
+  email: String!
+  phone: String
+}
+
+input CreateVendorInput {
+  name: String!
+  tagline: String
+  description: String
+  logoUrl: String
+  website: String
+  tags: [String!]!
+  contacts: [VendorContactInput!]!
+}
+
+input UpdateVendorInput {
+  id: ID!
+  name: String
+  tagline: String
+  description: String
+  logoUrl: String
+  website: String
+  tags: [String!]
+  contacts: [VendorContactInput!]
+}

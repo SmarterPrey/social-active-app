@@ -1,0 +1,106 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm off-white page surface, à la LinkedIn */
+    --background: 39 18% 95%;
+    --foreground: 0 0% 9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
+
+    /* LinkedIn-style blue */
+    --primary: 210 90% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 16% 93%;
+    --secondary-foreground: 0 0% 15%;
+
+    --muted: 210 16% 94%;
+    --muted-foreground: 0 0% 40%;
+
+    --accent: 210 90% 40%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 30 10% 88%;
+    --input: 30 10% 88%;
+    --ring: 210 90% 40%;
+
+    --radius: 0.5rem;
+
+    /* Top navbar surface (white) */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 0 0% 38%;
+    --sidebar-border: 30 10% 88%;
+  }
+
+  .dark {
+    --background: 0 0% 11%;
+    --foreground: 0 0% 92%;
+
+    --card: 0 0% 15%;
+    --card-foreground: 0 0% 92%;
+
+    --popover: 0 0% 15%;
+    --popover-foreground: 0 0% 92%;
+
+    --primary: 209 98% 61%;
+    --primary-foreground: 0 0% 11%;
+
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 0 0% 88%;
+
+    --muted: 0 0% 18%;
+    --muted-foreground: 0 0% 63%;
+
+    --accent: 209 98% 61%;
+    --accent-foreground: 0 0% 11%;
+
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 22%;
+    --input: 0 0% 22%;
+    --ring: 209 98% 61%;
+
+    --sidebar: 0 0% 13%;
+    --sidebar-foreground: 0 0% 72%;
+    --sidebar-border: 0 0% 22%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Card shadow utility mimicking LinkedIn's soft elevation */
+@layer utilities {
+  .shadow-card {
+    box-shadow: 0 0 0 1px hsl(var(--border)), 0 1px 2px rgb(0 0 0 / 0.06);
+  }
+  .shadow-card-hover {
+    box-shadow: 0 0 0 1px hsl(var(--border)), 0 4px 12px rgb(0 0 0 / 0.08);
+  }
+}
+
+/* Darkened background for public-facing (unauthenticated) pages */
+.public-page {
+  --background: 39 18% 92%;
+}
+.dark .public-page {
+  --background: 0 0% 9%;
+}

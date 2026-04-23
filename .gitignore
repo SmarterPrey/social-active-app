@@ -1,0 +1,20 @@
+!jest.config.js
+node_modules
+
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+config.ts
+cdk-infra.json
+cdk.context.json
+
+# TypeScript compiled output in app/web/src (not in root or lib)
+app/web/src/**/*.d.ts
+app/web/src/**/*.js
+app/web/src/**/*.js.map
+!app/web/src/vite-env.d.ts
+
+#App
+app/web/.env
+app/web/dist

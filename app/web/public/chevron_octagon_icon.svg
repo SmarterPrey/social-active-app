@@ -1,0 +1,24 @@
+<svg width="32" height="32" viewBox="198 46 284 268" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="octa-fill" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#6C3BFF"/>
+    <stop offset="50%" stop-color="#E8355A"/>
+    <stop offset="100%" stop-color="#FF8C00"/>
+  </linearGradient>
+  <linearGradient id="inner-ring" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#8B5CF6"/>
+    <stop offset="100%" stop-color="#F43F5E"/>
+  </linearGradient>
+</defs>
+
+<polygon points="&#10;    340,50&#10;    430,68&#10;    478,150&#10;    478,210&#10;    430,292&#10;    340,310&#10;    250,292&#10;    202,210&#10;    202,150&#10;    250,68&#10;  " fill="url(#octa-fill)" style="stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+
+<polygon points="&#10;    340,66&#10;    420,82&#10;    463,156&#10;    463,204&#10;    420,278&#10;    340,294&#10;    260,278&#10;    217,204&#10;    217,156&#10;    260,82&#10;  " fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="2" style="fill:none;stroke:rgba(255, 255, 255, 0.18);color:rgb(0, 0, 0);stroke-width:2px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+
+<path d="M294 130 L386 180 L294 230" fill="none" stroke="white" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" style="fill:none;stroke:rgb(255, 255, 255);color:rgb(0, 0, 0);stroke-width:28px;stroke-linecap:round;stroke-linejoin:round;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+
+<path d="M294 130 L386 180 L294 230" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round" style="fill:none;stroke:rgba(255, 255, 255, 0.25);color:rgb(0, 0, 0);stroke-width:42px;stroke-linecap:round;stroke-linejoin:round;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+
+<path d="M294 130 L386 180 L294 230" fill="none" stroke="white" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" style="fill:none;stroke:rgb(255, 255, 255);color:rgb(0, 0, 0);stroke-width:28px;stroke-linecap:round;stroke-linejoin:round;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+
+</svg>

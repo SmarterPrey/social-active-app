@@ -1,0 +1,437 @@
+name: Security & Dependency Scan (Claude)
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Every Monday at 8am UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  security-events: write
+
+env:
+  ANTHROPIC_MODEL: claude-sonnet-4-20250514
+
+jobs:
+  scan:
+    name: Claude Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------
+      # 1. Gather dependency & vulnerability data
+      # ---------------------------------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install frontend dependencies
+        working-directory: app/web
+        run: npm install --package-lock-only 2>/dev/null || true
+
+      - name: Run npm audit (root)
+        run: npm audit --json > /tmp/audit-root.json 2>/dev/null || true
+
+      - name: Run npm audit (frontend)
+        working-directory: app/web
+        run: npm audit --json > /tmp/audit-frontend.json 2>/dev/null || true
+
+      - name: Collect license info (root)
+        run: |
+          npx license-checker --json --production > /tmp/licenses-root.json 2>/dev/null || true
+
+      - name: Collect license info (frontend)
+        working-directory: app/web
+        run: |
+          npx license-checker --json --production > /tmp/licenses-frontend.json 2>/dev/null || true
+
+      - name: Check for non-registry dependencies
+        run: |
+          echo "=== Root package.json ===" > /tmp/dep-sources.txt
+          cat package.json | jq -r '(.dependencies // {}) + (.devDependencies // {}) | to_entries[] | "\(.key): \(.value)"' >> /tmp/dep-sources.txt
+          echo "" >> /tmp/dep-sources.txt
+          echo "=== Frontend package.json ===" >> /tmp/dep-sources.txt
+          cat app/web/package.json | jq -r '(.dependencies // {}) + (.devDependencies // {}) | to_entries[] | "\(.key): \(.value)"' >> /tmp/dep-sources.txt
+          echo "" >> /tmp/dep-sources.txt
+          echo "=== Lambda package.json ===" >> /tmp/dep-sources.txt
+          cat api/lambda/package.json | jq -r '(.dependencies // {}) + (.devDependencies // {}) | to_entries[] | "\(.key): \(.value)"' >> /tmp/dep-sources.txt 2>/dev/null || true
+
+      # ---------------------------------------------------------------
+      # 1b. Check latest AWS SDK/CDK/CLI versions
+      # ---------------------------------------------------------------
+      - name: Fetch latest AWS package versions
+        run: |
+          echo "=== AWS Package Version Check ===" > /tmp/version-check.txt
+          echo "" >> /tmp/version-check.txt
+
+          # Key packages to check
+          PACKAGES=("aws-cdk-lib" "aws-cdk" "@aws-cdk/aws-neptune-alpha" "constructs" "typescript" "esbuild" "cdk-nag")
+
+          for pkg in "${PACKAGES[@]}"; do
+            LATEST=$(npm view "$pkg" version 2>/dev/null || echo "unknown")
+
+            # Try to find installed version from package.json
+            INSTALLED=$(jq -r --arg p "$pkg" '(.dependencies[$p] // .devDependencies[$p] // "not installed")' package.json)
+            if [ "$INSTALLED" == "not installed" ]; then
+              INSTALLED=$(jq -r --arg p "$pkg" '(.dependencies[$p] // .devDependencies[$p] // "not installed")' app/web/package.json 2>/dev/null || echo "not installed")
+            fi
+
+            echo "$pkg: installed=$INSTALLED latest=$LATEST" >> /tmp/version-check.txt
+          done
+
+          # Also check AWS CLI from the runner
+          AWS_CLI_VERSION=$(aws --version 2>/dev/null | awk '{print $1}' | cut -d/ -f2 || echo "unknown")
+          echo "aws-cli: installed=$AWS_CLI_VERSION" >> /tmp/version-check.txt
+
+          echo "" >> /tmp/version-check.txt
+          echo "--- Installed versions (package-lock.json resolved) ---" >> /tmp/version-check.txt
+          for pkg in "${PACKAGES[@]}"; do
+            RESOLVED=$(jq -r --arg p "$pkg" '.packages["node_modules/" + $p].version // "not in lockfile"' package-lock.json 2>/dev/null || echo "not in lockfile")
+            echo "$pkg: resolved=$RESOLVED" >> /tmp/version-check.txt
+          done
+
+          cat /tmp/version-check.txt
+
+      # ---------------------------------------------------------------
+      # 1c. Fetch and triage Dependabot alerts
+      # ---------------------------------------------------------------
+      - name: Fetch Dependabot alerts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch all open Dependabot alerts
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/dependabot/alerts?state=open&per_page=100" \
+            > /tmp/dependabot-alerts.json 2>/dev/null || echo "[]" > /tmp/dependabot-alerts.json
+
+          echo "Open Dependabot alerts: $(jq length /tmp/dependabot-alerts.json)"
+
+      - name: Dismiss unfixable Dependabot alerts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Identify alerts where the vulnerable package is bundled inside
+          # aws-cdk-lib or jest (no fix available from our side)
+          BUNDLED_PACKAGES=("minimatch" "ajv" "glob")
+
+          jq -c '.[]' /tmp/dependabot-alerts.json | while read -r alert; do
+            ALERT_NUM=$(echo "$alert" | jq -r '.number')
+            PKG_NAME=$(echo "$alert" | jq -r '.security_vulnerability.package.name')
+            # Check the dependency path — if it's inside aws-cdk-lib or jest bundled deps
+            DEP_PATH=$(echo "$alert" | jq -r '.dependency.manifest_path // ""')
+            SCOPE=$(echo "$alert" | jq -r '.dependency.scope // ""')
+
+            SHOULD_DISMISS=false
+
+            # Check if this is a known bundled/unfixable package
+            for bundled in "${BUNDLED_PACKAGES[@]}"; do
+              if [[ "$PKG_NAME" == "$bundled" ]]; then
+                SHOULD_DISMISS=true
+                break
+              fi
+            done
+
+            if [[ "$SHOULD_DISMISS" == "true" ]]; then
+              echo "Dismissing alert #${ALERT_NUM} (${PKG_NAME}) — bundled in upstream dependency, no fix available"
+              gh api \
+                --method PATCH \
+                -H "Accept: application/vnd.github+json" \
+                "/repos/${{ github.repository }}/dependabot/alerts/${ALERT_NUM}" \
+                -f state="dismissed" \
+                -f dismissed_reason="no_bandwidth" \
+                -f dismissed_comment="Auto-dismissed: ${PKG_NAME} is bundled inside aws-cdk-lib/jest — fix must come from upstream maintainers. Reviewed by security scan workflow." \
+                > /dev/null 2>&1 || echo "::warning::Failed to dismiss alert #${ALERT_NUM}"
+            fi
+          done
+
+          # Write remaining open alerts for Claude context
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/dependabot/alerts?state=open&per_page=100" \
+            > /tmp/dependabot-remaining.json 2>/dev/null || echo "[]" > /tmp/dependabot-remaining.json
+
+          TOTAL_BEFORE=$(jq length /tmp/dependabot-alerts.json)
+          REMAINING=$(jq length /tmp/dependabot-remaining.json)
+          DISMISSED=$((TOTAL_BEFORE - REMAINING))
+          echo "Dismissed: $DISMISSED | Remaining: $REMAINING"
+          echo "dismissed_count=$DISMISSED" >> $GITHUB_ENV
+          echo "remaining_count=$REMAINING" >> $GITHUB_ENV
+
+      # ---------------------------------------------------------------
+      # 2. Gather source code for vulnerability review
+      # ---------------------------------------------------------------
+      - name: Collect source files for review
+        run: |
+          echo "=== CDK Infrastructure ===" > /tmp/source-code.txt
+          for f in lib/*.ts lib/constructs/*.ts bin/*.ts config.ts; do
+            if [ -f "$f" ]; then
+              echo "--- FILE: $f ---" >> /tmp/source-code.txt
+              cat "$f" >> /tmp/source-code.txt
+              echo "" >> /tmp/source-code.txt
+            fi
+          done
+
+          echo "=== Lambda Functions ===" >> /tmp/source-code.txt
+          find api/lambda -name '*.ts' ! -path '*/node_modules/*' | while read f; do
+            echo "--- FILE: $f ---" >> /tmp/source-code.txt
+            cat "$f" >> /tmp/source-code.txt
+            echo "" >> /tmp/source-code.txt
+          done
+
+          echo "=== GitHub Workflows ===" >> /tmp/source-code.txt
+          for f in .github/workflows/*.yml; do
+            echo "--- FILE: $f ---" >> /tmp/source-code.txt
+            cat "$f" >> /tmp/source-code.txt
+            echo "" >> /tmp/source-code.txt
+          done
+
+      # ---------------------------------------------------------------
+      # 3. Build the prompt and call Claude
+      # ---------------------------------------------------------------
+      - name: Build Claude prompt
+        run: |
+          cat > /tmp/prompt.txt << 'PROMPT_END'
+          You are a senior security engineer performing a comprehensive security audit of a repository.
+          Analyze the following data and produce a structured Markdown report covering EXACTLY these four categories:
+
+          ## 1. Code Vulnerabilities
+          Scan the source code for:
+          - Hardcoded secrets, API keys, or credentials
+          - SQL/Gremlin injection risks
+          - Insecure IAM policies (overly broad wildcards)
+          - Missing input validation
+          - Insecure deserialization
+          - SSRF, XSS, or command injection vectors
+          - Misconfigured security groups or network access
+          - Logging of sensitive data
+
+          ## 2. Patchable Dependencies
+          Using the npm audit data, identify ONLY vulnerabilities that have available fixes
+          the project maintainer can actually apply. Specifically:
+          - List vulnerabilities with available fixes and recommended upgrade commands
+          - Severity breakdown (critical/high/moderate/low) for fixable issues only
+          - COMPLETELY OMIT vulnerabilities that are bundled inside upstream packages
+            (e.g. minimatch, ajv, glob inside aws-cdk-lib or jest) — these cannot be
+            fixed by the project maintainer and should not appear in the report at all
+          - If all vulnerabilities are unfixable upstream issues, report ✅ for this section
+
+          ## 3. GPL-Licensed Dependencies
+          From the license data, identify:
+          - Any dependencies using GPL, LGPL, AGPL, or other copyleft licenses
+          - Their license type and what it means for this project
+          - Whether they are production dependencies (risky) or dev-only (lower risk)
+
+          ## 4. Non-Official Registry Dependencies
+          From the dependency version specifiers, flag:
+          - Any git:// or github: URLs
+          - Any file: or link: references
+          - Any tarball URLs
+          - Any packages from private registries
+          - All dependencies should come from the official npm registry
+
+          ## 5. AWS SDK/CDK/CLI Version Freshness
+          Using the version check data, report:
+          - Which AWS packages are outdated and what the latest version is
+          - Whether the update is a patch, minor, or major version bump
+          - Recommended update commands (e.g. npm install aws-cdk-lib@latest)
+          - ONLY report packages where an update is actually available
+          - Do NOT flag a package as outdated if the installed version already satisfies
+            the latest release (e.g. ^2.238.0 when latest is 2.239.0 is fine to flag,
+            but only if updating would fix a security issue or the gap is significant)
+          - Do NOT report vulnerabilities tied to CDK/CLI versions where there is no
+            newer version that fixes the issue — only report if upgrading would help
+          - If all packages are current, report ✅ for this section
+
+          Format your output as a single Markdown document with:
+          - A summary table at the top with counts per category (✅ none found or ⚠️ N issues) for all 5 sections
+          - Detailed findings under each section
+          - Actionable recommendations
+          - A final risk rating: LOW / MEDIUM / HIGH / CRITICAL
+
+          IMPORTANT: At the very end of your response, after the Markdown report, output a JSON block
+          fenced with ```json and ``` containing an array of actionable findings to create as GitHub issues.
+          Each finding should have: title, severity (critical/high/medium/low), category (code-vuln/dependency/license/registry), body (markdown description with file paths and remediation steps).
+          Only include findings that are ACTIONABLE — skip unfixable upstream bundled dependency issues.
+          If there are no actionable findings, output an empty array: ```json\n[]\n```
+          PROMPT_END
+
+      - name: Call Claude API
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Truncate large files to stay within token limits
+          head -c 80000 /tmp/source-code.txt > /tmp/source-code-trimmed.txt
+          head -c 40000 /tmp/audit-root.json > /tmp/audit-root-trimmed.json
+          head -c 40000 /tmp/audit-frontend.json > /tmp/audit-frontend-trimmed.json
+          head -c 40000 /tmp/licenses-root.json > /tmp/licenses-root-trimmed.json
+          head -c 40000 /tmp/licenses-frontend.json > /tmp/licenses-frontend-trimmed.json
+
+          # Build the message content
+          PROMPT=$(cat /tmp/prompt.txt)
+          SOURCE=$(cat /tmp/source-code-trimmed.txt)
+          AUDIT_ROOT=$(cat /tmp/audit-root-trimmed.json)
+          AUDIT_FRONTEND=$(cat /tmp/audit-frontend-trimmed.json)
+          LICENSES_ROOT=$(cat /tmp/licenses-root-trimmed.json)
+          LICENSES_FRONTEND=$(cat /tmp/licenses-frontend-trimmed.json)
+          DEP_SOURCES=$(cat /tmp/dep-sources.txt)
+          DEPENDABOT=$(cat /tmp/dependabot-remaining.json | head -c 20000)
+          VERSIONS=$(cat /tmp/version-check.txt)
+
+          # Create the API request payload
+          jq -n \
+            --arg model "$ANTHROPIC_MODEL" \
+            --arg prompt "$PROMPT" \
+            --arg source "$SOURCE" \
+            --arg audit_root "$AUDIT_ROOT" \
+            --arg audit_frontend "$AUDIT_FRONTEND" \
+            --arg licenses_root "$LICENSES_ROOT" \
+            --arg licenses_frontend "$LICENSES_FRONTEND" \
+            --arg dep_sources "$DEP_SOURCES" \
+            --arg dependabot "$DEPENDABOT" \
+            --arg versions "$VERSIONS" \
+            '{
+              model: $model,
+              max_tokens: 8192,
+              messages: [{
+                role: "user",
+                content: ($prompt + "\n\n<source_code>\n" + $source + "\n</source_code>\n\n<npm_audit_root>\n" + $audit_root + "\n</npm_audit_root>\n\n<npm_audit_frontend>\n" + $audit_frontend + "\n</npm_audit_frontend>\n\n<licenses_root>\n" + $licenses_root + "\n</licenses_root>\n\n<licenses_frontend>\n" + $licenses_frontend + "\n</licenses_frontend>\n\n<dependency_sources>\n" + $dep_sources + "\n</dependency_sources>\n\n<dependabot_open_alerts>\n" + $dependabot + "\n</dependabot_open_alerts>\n\n<aws_version_check>\n" + $versions + "\n</aws_version_check>")
+              }]
+            }' > /tmp/api-request.json
+
+          # Call the Anthropic API
+          HTTP_STATUS=$(curl -s -w "%{http_code}" -o /tmp/api-response.json \
+            -X POST https://api.anthropic.com/v1/messages \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+            -H "anthropic-version: 2023-06-01" \
+            -d @/tmp/api-request.json)
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Claude API returned HTTP $HTTP_STATUS"
+            cat /tmp/api-response.json
+            exit 1
+          fi
+
+          # Extract the response text
+          jq -r '.content[0].text' /tmp/api-response.json > /tmp/scan-report.md
+          echo "Claude scan complete."
+
+      # ---------------------------------------------------------------
+      # 4. Output results
+      # ---------------------------------------------------------------
+      - name: Extract report and findings
+        run: |
+          # Split Claude's response into the markdown report and JSON findings
+          FULL_RESPONSE=$(cat /tmp/scan-report.md)
+
+          # Extract JSON findings block
+          echo "$FULL_RESPONSE" | sed -n '/^```json/,/^```$/p' | sed '1d;$d' > /tmp/findings.json
+
+          # Extract just the markdown report (everything before the JSON block)
+          echo "$FULL_RESPONSE" | sed '/^```json/,$d' > /tmp/scan-report-clean.md
+
+          # Validate JSON; fall back to empty array
+          if ! jq empty /tmp/findings.json 2>/dev/null; then
+            echo "[]" > /tmp/findings.json
+          fi
+
+          FINDING_COUNT=$(jq length /tmp/findings.json)
+          echo "Actionable findings: $FINDING_COUNT"
+          echo "finding_count=$FINDING_COUNT" >> $GITHUB_ENV
+
+      - name: Write GitHub Step Summary
+        run: |
+          echo "# 🔒 Security & Dependency Scan Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Generated by Claude (${ANTHROPIC_MODEL}) on $(date -u '+%Y-%m-%d %H:%M UTC')_" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Dependabot Triage" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Alerts dismissed (unfixable) | ${{ env.dismissed_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Alerts remaining (open) | ${{ env.remaining_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Claude findings → issues | ${{ env.finding_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          cat /tmp/scan-report-clean.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Create GitHub issues for findings
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FINDING_COUNT=$(jq length /tmp/findings.json)
+          if [ "$FINDING_COUNT" -eq 0 ]; then
+            echo "No actionable findings — skipping issue creation."
+            exit 0
+          fi
+
+          # Iterate over each finding and create an issue (skip duplicates)
+          jq -c '.[]' /tmp/findings.json | while read -r finding; do
+            TITLE=$(echo "$finding" | jq -r '.title')
+            SEVERITY=$(echo "$finding" | jq -r '.severity')
+            CATEGORY=$(echo "$finding" | jq -r '.category')
+            BODY=$(echo "$finding" | jq -r '.body')
+
+            FULL_TITLE="AI Created: [${SEVERITY^^}] ${TITLE}"
+
+            # Check if an issue with this title already exists
+            EXISTING=$(gh issue list \
+              --repo "${{ github.repository }}" \
+              --search "\"${FULL_TITLE}\" in:title" \
+              --state open \
+              --json number \
+              --jq 'length')
+
+            if [ "$EXISTING" -gt 0 ]; then
+              echo "Issue already exists: ${FULL_TITLE} — skipping"
+              continue
+            fi
+
+            ISSUE_BODY=$(cat <<EOF
+          ## Security Finding
+
+          **Severity:** ${SEVERITY}
+          **Category:** ${CATEGORY}
+          **Source:** Claude Security Scan ($(date -u '+%Y-%m-%d'))
+
+          ---
+
+          ${BODY}
+
+          ---
+          _This issue was automatically created by the [Security Scan workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})._
+          EOF
+          )
+
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "${FULL_TITLE}" \
+              --body "${ISSUE_BODY}" \
+              --label "security" \
+              || echo "::warning::Failed to create issue: ${FULL_TITLE}"
+
+            echo "Created issue: ${FULL_TITLE}"
+          done
+
+      - name: Upload scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-report
+          path: /tmp/scan-report-clean.md
+          retention-days: 90
+
+      - name: Check for critical findings
+        run: |
+          if grep -qi "CRITICAL" /tmp/scan-report-clean.md; then
+            echo "::warning::Critical findings detected — review the scan report"
+          fi
