@@ -167,6 +167,150 @@ jobs:
           echo "remaining_count=$REMAINING" >> $GITHUB_ENV
 
       # ---------------------------------------------------------------
+      # 1d. Dependency quarantine — flag packages published < 3 days ago
+      # ---------------------------------------------------------------
+      - name: Check dependency quarantine (3-day hold)
+        run: |
+          cat > /tmp/check-quarantine.js << 'JSEOF'
+          const { execSync } = require('child_process');
+          const fs = require('fs');
+
+          const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+          const now = Date.now();
+          const quarantined = [];
+          const manifest_checks = [
+            { pkgFile: 'package.json',           lockFile: 'package-lock.json' },
+            { pkgFile: 'app/web/package.json',    lockFile: 'app/web/package-lock.json' },
+            { pkgFile: 'api/lambda/package.json', lockFile: 'api/lambda/package-lock.json' },
+          ];
+
+          for (const { pkgFile, lockFile } of manifest_checks) {
+            if (!fs.existsSync(pkgFile)) continue;
+            const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8'));
+            const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+            const lockPath = fs.existsSync(lockFile) ? lockFile : 'package-lock.json';
+            if (!fs.existsSync(lockPath)) continue;
+            const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+
+            for (const depName of Object.keys(deps)) {
+              const version = lock.packages?.['node_modules/' + depName]?.version;
+              if (!version) continue;
+              let publishTime = null;
+              try {
+                const raw = execSync(
+                  `npm view "${depName}@${version}" time --json 2>/dev/null`,
+                  { timeout: 15000 }
+                ).toString().trim();
+                publishTime = JSON.parse(raw)[version];
+              } catch {}
+              if (!publishTime) continue;
+              const age = now - new Date(publishTime).getTime();
+              if (age > 0 && age < THREE_DAYS_MS) {
+                const hours = Math.floor(age / (1000 * 3600));
+                quarantined.push(
+                  `QUARANTINE: ${depName}@${version} — published ${hours}h ago (${publishTime}) [${pkgFile}]`
+                );
+              }
+            }
+          }
+
+          let report = '=== Dependency Quarantine Check (3-day hold) ===\n';
+          report += 'Packages published within the last 72 hours are flagged.\n';
+          report += `Scan time: ${new Date().toISOString()}\n\n`;
+          if (quarantined.length === 0) {
+            report += '✅ No packages within the 3-day quarantine window.\n';
+          } else {
+            report += `⚠️  ${quarantined.length} package(s) in quarantine period:\n\n`;
+            quarantined.forEach(q => { report += '  ' + q + '\n'; });
+            report += '\nRecommendation: Do not merge PRs introducing these packages until quarantine expires.\n';
+          }
+          fs.writeFileSync('/tmp/quarantine-report.txt', report);
+          console.log(report);
+          JSEOF
+          node /tmp/check-quarantine.js \
+            || echo "::warning::Quarantine check failed — skipping" \
+            && touch /tmp/quarantine-report.txt
+
+      # ---------------------------------------------------------------
+      # 1e. AWS CIS Benchmark — IaC static analysis (Checkov)
+      # ---------------------------------------------------------------
+      - name: Set up Python for Checkov
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Checkov
+        run: pip install checkov --quiet
+
+      - name: Synthesize CDK templates for CIS scan
+        env:
+          AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+          AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+          AWS_DEFAULT_REGION: us-east-1
+          CDK_DEFAULT_ACCOUNT: '123456789012'
+          CDK_DEFAULT_REGION: us-east-1
+        run: |
+          npm run build 2>/dev/null || true
+          # cdk.context.json provides cached lookups — no live AWS calls needed
+          npx cdk synth --all --quiet 2>/tmp/cdk-synth.log || true
+          TMPL_COUNT=$(ls cdk.out/*.template.json 2>/dev/null | wc -l | tr -d ' ')
+          echo "cdk_template_count=$TMPL_COUNT" >> $GITHUB_ENV
+          echo "CDK templates generated: $TMPL_COUNT"
+          [ "$TMPL_COUNT" -gt 0 ] || { echo "::warning::CDK synthesis yielded no templates — falling back to lib/"; tail -20 /tmp/cdk-synth.log; }
+
+      - name: Run Checkov CIS benchmark scan
+        run: |
+          TMPL_COUNT="${{ env.cdk_template_count }}"
+          if [ "${TMPL_COUNT:-0}" -gt 0 ]; then
+            SCAN_TARGET="cdk.out"
+          else
+            SCAN_TARGET="lib"
+            echo "::notice::Scanning lib/ TypeScript — synthesize CDK for full CloudFormation CIS coverage"
+          fi
+
+          mkdir -p /tmp/checkov-out
+          checkov \
+            --directory "$SCAN_TARGET" \
+            --framework cloudformation \
+            --output json \
+            --output sarif \
+            --output-file-path /tmp/checkov-out \
+            --soft-fail \
+            --compact \
+            2>/tmp/checkov-stderr.txt || true
+
+          JSON_FILE=$(find /tmp/checkov-out -name "*.json" 2>/dev/null | head -1)
+          SARIF_FILE=$(find /tmp/checkov-out -name "*.sarif" 2>/dev/null | head -1)
+
+          if [ -n "$JSON_FILE" ]; then
+            cp "$JSON_FILE" /tmp/checkov-results.json
+          else
+            echo '{"results":{"failed_checks":[],"passed_checks":[]},"summary":{"passed":0,"failed":0}}' \
+              > /tmp/checkov-results.json
+          fi
+
+          if [ -n "$SARIF_FILE" ]; then
+            cp "$SARIF_FILE" /tmp/checkov-results.sarif
+          else
+            printf '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' \
+              > /tmp/checkov-results.sarif
+          fi
+
+          FAILED=$(jq '([.results.failed_checks // []] | flatten | length)' /tmp/checkov-results.json 2>/dev/null || echo 0)
+          PASSED=$(jq '([.results.passed_checks // []] | flatten | length)' /tmp/checkov-results.json 2>/dev/null || echo 0)
+          echo "cis_failed=$FAILED" >> $GITHUB_ENV
+          echo "cis_passed=$PASSED" >> $GITHUB_ENV
+          echo "Checkov: $FAILED failed checks, $PASSED passed"
+
+      - name: Upload CIS scan results to GitHub code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: /tmp/checkov-results.sarif
+          category: cis-iac-benchmark
+        continue-on-error: true
+
+      # ---------------------------------------------------------------
       # 2. Gather source code for vulnerability review
       # ---------------------------------------------------------------
       - name: Collect source files for review
@@ -251,15 +395,32 @@ jobs:
             newer version that fixes the issue — only report if upgrading would help
           - If all packages are current, report ✅ for this section
 
+          ## 6. New Dependency Quarantine (3-day hold)
+          Using the quarantine report, flag any packages published within the last 3 days:
+          - List each quarantined package, its version, and hours since publication
+          - Assess risk: known maintainer? Unusual scope creep in the release? Typosquatting potential?
+          - Recommend deferring deployment until the 3-day quarantine window closes
+          - Note: the quarantine period gives the community time to detect malicious or compromised releases
+          - If no packages are in quarantine, report ✅ for this section
+
+          ## 7. AWS CIS Benchmark Compliance (IaC)
+          Using the Checkov scan results, analyze CDK/CloudFormation IaC compliance with AWS CIS benchmarks:
+          - List failed checks grouped by category: IAM, logging, encryption, network security, storage
+          - For each failure provide: check ID, rule description, affected resource, and CDK remediation guidance
+          - Note checks already suppressed via cdk-nag to avoid duplicate reporting
+          - Prioritize HIGH and CRITICAL severity findings
+          - If synthesis was unavailable, note the limitation and recommend running cdk synth locally
+          - If all checks pass, report ✅ for this section
+
           Format your output as a single Markdown document with:
-          - A summary table at the top with counts per category (✅ none found or ⚠️ N issues) for all 5 sections
+          - A summary table at the top with counts per category (✅ none found or ⚠️ N issues) for all 7 sections
           - Detailed findings under each section
           - Actionable recommendations
           - A final risk rating: LOW / MEDIUM / HIGH / CRITICAL
 
           IMPORTANT: At the very end of your response, after the Markdown report, output a JSON block
           fenced with ```json and ``` containing an array of actionable findings to create as GitHub issues.
-          Each finding should have: title, severity (critical/high/medium/low), category (code-vuln/dependency/license/registry), body (markdown description with file paths and remediation steps).
+          Each finding should have: title, severity (critical/high/medium/low), category (code-vuln/dependency/license/registry/quarantine/cis-benchmark), body (markdown description with file paths and remediation steps).
           Only include findings that are ACTIONABLE — skip unfixable upstream bundled dependency issues.
           If there are no actionable findings, output an empty array: ```json\n[]\n```
           PROMPT_END
