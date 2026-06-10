@@ -30,7 +30,6 @@ export const Route = createFileRoute("/_authenticated/_layout/")({
 });
 
 function FeedPage() {
-  // @ts-ignore — TanStack Router deep type instantiation
   const q = useRouterState({
     select: (s) => (s.location.search as { q?: string }).q ?? "",
   }) as string;

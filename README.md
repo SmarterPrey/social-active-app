@@ -93,15 +93,64 @@ npm ci
 # Bootstrap (first time, per account+region)
 npm run cdk -- bootstrap --profile <YOUR_AWS_PROFILE>
 
-# Deploy backend (Neptune, VPC, AppSync, Cognito, observability)
-npm run deployBackend -- --all --profile <YOUR_AWS_PROFILE>
+# Deploy shared DNS (Route 53 hosted zone + SES identity) — once per account
+npm run deployDns -- --profile <YOUR_AWS_PROFILE>
 
-# Generate the React .env from CDK outputs
+# After deploying, retrieve the Route 53 nameservers and update your domain registrar:
+aws route53 list-hosted-zones-by-name \
+  --dns-name mucker.io \
+  --profile <YOUR_AWS_PROFILE> \
+  --query "HostedZones[0].Id" \
+  --output text | xargs -I{} \
+  aws route53 get-hosted-zone --id {} --profile <YOUR_AWS_PROFILE> \
+  --query "DelegationSet.NameServers" --output table
+# Log in to your domain registrar and set the NS records to the four
+# nameservers printed above. DNS changes propagate within minutes to 48 hours.
+# SES DKIM verification completes automatically once NS records are live.
+
+# Deploy backend for a specific stage (dev | qa | prod)
+# Stack names are prefixed: dev-mucker-*, qa-mucker-*, pr-mucker-*
+npm run deployBackend:dev  -- --profile <YOUR_AWS_PROFILE>
+npm run deployBackend:qa   -- --profile <YOUR_AWS_PROFILE>
+npm run deployBackend:prod -- --profile <YOUR_AWS_PROFILE>
+
+# Generate the React .env from CDK outputs (run after each backend deploy)
 npm run generateEnv
 
-# Deploy frontend (S3 + CloudFront)
-npm run deployFrontend -- --all --profile <YOUR_AWS_PROFILE>
+# Deploy frontend for a specific stage (S3 + CloudFront)
+npm run deployFrontend:dev  -- --profile <YOUR_AWS_PROFILE>
+npm run deployFrontend:qa   -- --profile <YOUR_AWS_PROFILE>
+npm run deployFrontend:prod -- --profile <YOUR_AWS_PROFILE>
 ```
+
+### Stage reference
+
+| Stage  | Branch  | Stack prefix     | Commands                                              |
+|--------|---------|------------------|-------------------------------------------------------|
+| `dev`  | `dev`   | `dev-mucker-*`   | `deployBackend:dev`, `deployFrontend:dev`             |
+| `qa`   | `qa`    | `qa-mucker-*`    | `deployBackend:qa`, `deployFrontend:qa`               |
+| `prod` | `main`  | `pr-mucker-*`    | `deployBackend:prod`, `deployFrontend:prod`           |
+
+**Shared resources** (deployed once, stage-agnostic):
+- `mucker-DnsStack` — Route 53 hosted zone + SES identity for `mucker.io`
+
+### Per-stage AWS account IDs
+
+To pin each stage to a specific AWS account (without relying solely on
+`--profile` resolution), copy `.env.sample` to `.env` and fill in:
+
+```bash
+cp .env.sample .env
+# edit .env
+DEV_ACCOUNT_ID=111111111111
+QA_ACCOUNT_ID=222222222222
+PROD_ACCOUNT_ID=333333333333
+```
+
+`bin/backend.ts`, `bin/frontend.ts`, and `bin/dns.ts` load `.env` at
+startup and use `<STAGE>_ACCOUNT_ID` as the deployment account (overriding
+`CDK_DEFAULT_ACCOUNT`). Optional `<STAGE>_REGION` overrides the region.
+The `.env` file is gitignored.
 
 The frontend URL is printed as `socialActiveApp-WebappStack.webappurl…` and will ultimately resolve at `app.mucker.io`.
 
@@ -126,13 +175,129 @@ curl "${FUNCTION_URL}" \
 
 | Command | What it does |
 |---------|--------------|
-| `npm run deployBackend` | Deploy Neptune + API + Cognito stacks |
-| `npm run deployFrontend` | Deploy S3 + CloudFront SPA |
-| `npm run destroyBackend` | Tear down backend stacks |
-| `npm run destroyFrontend` | Tear down frontend stacks |
-| `npm run generateEnv` | Write `app/web/.env` from CDK outputs |
+| `npm run deployDns` | Deploy shared Route 53 hosted zone + SES identity (once per account) |
+| `npm run deployBackend:<stage>` | Deploy backend for a stage (`dev` → `dev-mucker-*`, `qa` → `qa-mucker-*`, `prod` → `pr-mucker-*`) |
+| `npm run deployFrontend:<stage>` | Deploy frontend S3 + CloudFront SPA for a stage |
+| `npm run destroyBackend:<stage>` | Tear down a stage's backend stacks (`dev`, `qa`, or `prod`) |
+| `npm run destroyFrontend:<stage>` | Tear down a stage's frontend stack |
+| `npm run generateEnv:<stage>` | Write `app/web/.env.<stage>` from CDK outputs |
 | `npm run build` | Compile TypeScript |
 | `npm test` | Run Jest tests |
+
+## Tearing down a deployment
+
+Each stage's destroy command passes `--all -c stage=<stage>` for you, so all
+four backend stacks (or the single frontend stack) for that stage come down
+together. The AWS account is selected by the profile/credentials you pass.
+
+**Stack name → stage mapping:**
+
+| CloudFormation stack prefix | Use this stage |
+|------------------------------|----------------|
+| `dev-mucker-*`               | `:dev`         |
+| `qa-mucker-*`                | `:qa`          |
+| `pr-mucker-*`                | `:prod`        |
+| `mucker-DnsStack`            | shared — see below |
+
+If a destroy command appears to do nothing, it's because no stacks for that
+stage exist in the target account. Verify with:
+
+```bash
+aws cloudformation list-stacks --profile <YOUR_AWS_PROFILE> \
+  --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+  --query 'StackSummaries[?contains(StackName,`mucker`)].StackName' \
+  --output table
+```
+
+```bash
+# Destroy a single stage (backend = 4 stacks, frontend = 1 stack)
+npm run destroyBackend:dev   -- --profile <YOUR_AWS_PROFILE>
+npm run destroyFrontend:dev  -- --profile <YOUR_AWS_PROFILE>
+
+npm run destroyBackend:qa    -- --profile <YOUR_AWS_PROFILE>
+npm run destroyFrontend:qa   -- --profile <YOUR_AWS_PROFILE>
+
+npm run destroyBackend:prod  -- --profile <YOUR_AWS_PROFILE>
+npm run destroyFrontend:prod -- --profile <YOUR_AWS_PROFILE>
+```
+
+CDK will list the stacks it found and prompt:
+`Are you sure you want to delete: ... (y/n)?` — answer `y`. Stacks delete one
+at a time; Neptune Network typically takes the longest (~5–10 min).
+
+**Neptune stopped-state gotcha:** Neptune instances cannot be deleted while
+the cluster is in `stopped` state (the nightly cost-saving schedule in
+`bin/backend.ts → neptuneSchedule` stops it automatically). The
+`destroyBackend:<stage>` npm scripts use `scripts/safe-destroy-backend.sh`
+which detects this and starts the cluster before running `cdk destroy`.
+Manual recovery if you hit `DELETE_FAILED` on `NeptuneNetworkStack`:
+
+```bash
+# 1. Start the cluster
+aws neptune start-db-cluster --db-cluster-identifier <cluster-id> \
+  --profile <YOUR_AWS_PROFILE>
+
+# 2. Wait until Status == "available" (roughly 5-10 min)
+aws neptune describe-db-clusters --db-cluster-identifier <cluster-id> \
+  --profile <YOUR_AWS_PROFILE> --query 'DBClusters[0].Status' --output text
+
+# 3. Retry the destroy
+npm run destroyBackend:prod -- --profile <YOUR_AWS_PROFILE>
+```
+
+**Order matters when fully removing a stage:** destroy the frontend first
+(it consumes API/Cognito outputs), then the backend.
+
+**Targeting a single stack** (e.g. just observability):
+
+```bash
+npm run destroyBackend -- -c stage=dev dev-mucker-ObservabilityStack \
+  --profile <YOUR_AWS_PROFILE>
+```
+
+The `-c stage=<stage>` context flag is required so CDK constructs the same
+stack names that were deployed.
+
+### Removing the shared `mucker-DnsStack`
+
+`destroyBackend:<stage>` and `destroyFrontend:<stage>` **do not** touch
+`mucker-DnsStack`. It lives in a separate CDK app (`bin/dns.ts`) because all
+stages share the same Route 53 hosted zone and SES identity for `mucker.io`.
+
+To remove it explicitly:
+
+```bash
+cdk destroy --app "node -e \"require('./bin/dns.js')\"" mucker-DnsStack \
+  --profile <YOUR_AWS_PROFILE>
+```
+
+⚠️ **Warnings before destroying DnsStack:**
+
+- **Nameservers will change.** Route 53 assigns a new set of NS records
+  every time the hosted zone is recreated. After redeploying you must update
+  the NS records at your domain registrar (the four `ns-*.awsdns-*.{com,
+  net,org,co.uk}` values printed by `npm run deployDns`).
+- **Email delivery will break.** The SES domain identity and DKIM records
+  go away with the zone. Cognito invitation emails and RSVP emails will
+  fail to send until DnsStack is redeployed and DKIM verification completes
+  (~5–15 min after redeploy).
+- **DNS propagation lag.** Even after redeploying, browsers and resolvers
+  may cache the old NS records for up to the previous TTL (typically 24–48
+  hours). Consider lowering TTLs ahead of time if a planned migration.
+- **Do not destroy DnsStack while any backend stack is still deployed** —
+  Cognito's email config references the SES identity ARN computed from
+  `${env.region}:${env.account}:identity/${config.domainName}`. Removing
+  the identity invalidates that reference. Tear down all stages' backends
+  first, then DnsStack.
+
+### Stateful resources to clean up manually
+
+(RemovalPolicy.RETAIN on prod, or resources CDK can't auto-empty):
+
+- S3 buckets that contain objects (CloudFront logs, media uploads) — empty
+  them in the console first, then re-run destroy
+- Neptune cluster snapshots and CloudWatch log groups
+- KMS CMKs (scheduled-deletion window applies)
 
 ## Neptune cluster cost control
 

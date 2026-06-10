@@ -36,7 +36,6 @@ function TopNavItem({
   icon: IconType;
   label: string;
 }) {
-  // @ts-ignore — TanStack Router deep type instantiation (TS2589)
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isActive = pathname === to || (to !== "/" && pathname.startsWith(to));
 

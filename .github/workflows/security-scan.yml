@@ -11,7 +11,8 @@ permissions:
   security-events: write
 
 env:
-  ANTHROPIC_MODEL: claude-sonnet-4-20250514
+  # Opus 4.7 — deepest reasoning for IaC + dependency security analysis
+  ANTHROPIC_MODEL: claude-opus-4-7
 
 jobs:
   scan:
@@ -232,85 +233,6 @@ jobs:
             && touch /tmp/quarantine-report.txt
 
       # ---------------------------------------------------------------
-      # 1e. AWS CIS Benchmark — IaC static analysis (Checkov)
-      # ---------------------------------------------------------------
-      - name: Set up Python for Checkov
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Checkov
-        run: pip install checkov --quiet
-
-      - name: Synthesize CDK templates for CIS scan
-        env:
-          AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
-          AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-          AWS_DEFAULT_REGION: us-east-1
-          CDK_DEFAULT_ACCOUNT: '123456789012'
-          CDK_DEFAULT_REGION: us-east-1
-        run: |
-          npm run build 2>/dev/null || true
-          # cdk.context.json provides cached lookups — no live AWS calls needed
-          npx cdk synth --all --quiet 2>/tmp/cdk-synth.log || true
-          TMPL_COUNT=$(ls cdk.out/*.template.json 2>/dev/null | wc -l | tr -d ' ')
-          echo "cdk_template_count=$TMPL_COUNT" >> $GITHUB_ENV
-          echo "CDK templates generated: $TMPL_COUNT"
-          [ "$TMPL_COUNT" -gt 0 ] || { echo "::warning::CDK synthesis yielded no templates — falling back to lib/"; tail -20 /tmp/cdk-synth.log; }
-
-      - name: Run Checkov CIS benchmark scan
-        run: |
-          TMPL_COUNT="${{ env.cdk_template_count }}"
-          if [ "${TMPL_COUNT:-0}" -gt 0 ]; then
-            SCAN_TARGET="cdk.out"
-          else
-            SCAN_TARGET="lib"
-            echo "::notice::Scanning lib/ TypeScript — synthesize CDK for full CloudFormation CIS coverage"
-          fi
-
-          mkdir -p /tmp/checkov-out
-          checkov \
-            --directory "$SCAN_TARGET" \
-            --framework cloudformation \
-            --output json \
-            --output sarif \
-            --output-file-path /tmp/checkov-out \
-            --soft-fail \
-            --compact \
-            2>/tmp/checkov-stderr.txt || true
-
-          JSON_FILE=$(find /tmp/checkov-out -name "*.json" 2>/dev/null | head -1)
-          SARIF_FILE=$(find /tmp/checkov-out -name "*.sarif" 2>/dev/null | head -1)
-
-          if [ -n "$JSON_FILE" ]; then
-            cp "$JSON_FILE" /tmp/checkov-results.json
-          else
-            echo '{"results":{"failed_checks":[],"passed_checks":[]},"summary":{"passed":0,"failed":0}}' \
-              > /tmp/checkov-results.json
-          fi
-
-          if [ -n "$SARIF_FILE" ]; then
-            cp "$SARIF_FILE" /tmp/checkov-results.sarif
-          else
-            printf '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' \
-              > /tmp/checkov-results.sarif
-          fi
-
-          FAILED=$(jq '([.results.failed_checks // []] | flatten | length)' /tmp/checkov-results.json 2>/dev/null || echo 0)
-          PASSED=$(jq '([.results.passed_checks // []] | flatten | length)' /tmp/checkov-results.json 2>/dev/null || echo 0)
-          echo "cis_failed=$FAILED" >> $GITHUB_ENV
-          echo "cis_passed=$PASSED" >> $GITHUB_ENV
-          echo "Checkov: $FAILED failed checks, $PASSED passed"
-
-      - name: Upload CIS scan results to GitHub code scanning
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: /tmp/checkov-results.sarif
-          category: cis-iac-benchmark
-        continue-on-error: true
-
-      # ---------------------------------------------------------------
       # 2. Gather source code for vulnerability review
       # ---------------------------------------------------------------
       - name: Collect source files for review
@@ -404,13 +326,30 @@ jobs:
           - If no packages are in quarantine, report ✅ for this section
 
           ## 7. AWS CIS Benchmark Compliance (IaC)
-          Using the Checkov scan results, analyze CDK/CloudFormation IaC compliance with AWS CIS benchmarks:
-          - List failed checks grouped by category: IAM, logging, encryption, network security, storage
-          - For each failure provide: check ID, rule description, affected resource, and CDK remediation guidance
-          - Note checks already suppressed via cdk-nag to avoid duplicate reporting
-          - Prioritize HIGH and CRITICAL severity findings
-          - If synthesis was unavailable, note the limitation and recommend running cdk synth locally
-          - If all checks pass, report ✅ for this section
+          Analyze the CDK TypeScript source under `lib/` and `lib/constructs/` (provided in
+          `<source_code>`) against the **AWS CIS Foundations Benchmark v3.0** and **CIS AWS
+          Compute Services Benchmark**. The same review criteria apply to CloudFormation
+          and Terraform IaC — reason about the resources the CDK constructs will produce.
+          For each finding, provide:
+          - The specific CIS control ID (e.g. CIS 2.1.1, 3.1, 4.2) and short description
+          - The affected CDK construct, file, and line range (use the file paths in `<source_code>`)
+          - Why it fails the benchmark
+          - Concrete CDK remediation as a TypeScript snippet
+          - Severity (critical/high/medium/low)
+
+          Group findings by category:
+          - **Identity & Access Management** — IAM wildcards, missing MFA, root usage, password policy
+          - **Logging & Monitoring** — CloudTrail, VPC flow logs, CloudWatch alarms, access logging
+          - **Encryption** — KMS CMK usage, S3/EBS/RDS/Neptune encryption at rest, TLS in transit
+          - **Networking** — open security groups (0.0.0.0/0), public subnets, NACLs, VPC endpoints
+          - **Storage & Data** — S3 public access blocks, bucket versioning, lifecycle, secure transport
+          - **Compute** — Lambda permissions, runtime versions, environment variable secrets
+
+          Cross-reference any findings already suppressed by cdk-nag (`AwsSolutionsChecks`)
+          in the source code under `nag/` and `lib/` — do not duplicate-report suppressed
+          issues unless the suppression looks unjustified. If a construct cannot be fully
+          evaluated from source alone, recommend running `cdk synth` locally for confirmation.
+          If all controls pass, report ✅ for this section.
 
           Format your output as a single Markdown document with:
           - A summary table at the top with counts per category (✅ none found or ⚠️ N issues) for all 7 sections
@@ -446,6 +385,7 @@ jobs:
           DEP_SOURCES=$(cat /tmp/dep-sources.txt)
           DEPENDABOT=$(cat /tmp/dependabot-remaining.json | head -c 20000)
           VERSIONS=$(cat /tmp/version-check.txt)
+          QUARANTINE=$(cat /tmp/quarantine-report.txt 2>/dev/null || echo "Quarantine check unavailable.")
 
           # Create the API request payload
           jq -n \
@@ -459,12 +399,13 @@ jobs:
             --arg dep_sources "$DEP_SOURCES" \
             --arg dependabot "$DEPENDABOT" \
             --arg versions "$VERSIONS" \
+            --arg quarantine "$QUARANTINE" \
             '{
               model: $model,
               max_tokens: 8192,
               messages: [{
                 role: "user",
-                content: ($prompt + "\n\n<source_code>\n" + $source + "\n</source_code>\n\n<npm_audit_root>\n" + $audit_root + "\n</npm_audit_root>\n\n<npm_audit_frontend>\n" + $audit_frontend + "\n</npm_audit_frontend>\n\n<licenses_root>\n" + $licenses_root + "\n</licenses_root>\n\n<licenses_frontend>\n" + $licenses_frontend + "\n</licenses_frontend>\n\n<dependency_sources>\n" + $dep_sources + "\n</dependency_sources>\n\n<dependabot_open_alerts>\n" + $dependabot + "\n</dependabot_open_alerts>\n\n<aws_version_check>\n" + $versions + "\n</aws_version_check>")
+                content: ($prompt + "\n\n<source_code>\n" + $source + "\n</source_code>\n\n<npm_audit_root>\n" + $audit_root + "\n</npm_audit_root>\n\n<npm_audit_frontend>\n" + $audit_frontend + "\n</npm_audit_frontend>\n\n<licenses_root>\n" + $licenses_root + "\n</licenses_root>\n\n<licenses_frontend>\n" + $licenses_frontend + "\n</licenses_frontend>\n\n<dependency_sources>\n" + $dep_sources + "\n</dependency_sources>\n\n<dependabot_open_alerts>\n" + $dependabot + "\n</dependabot_open_alerts>\n\n<aws_version_check>\n" + $versions + "\n</aws_version_check>\n\n<quarantine_report>\n" + $quarantine + "\n</quarantine_report>")
               }]
             }' > /tmp/api-request.json
 

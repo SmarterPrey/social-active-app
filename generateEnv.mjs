@@ -1,56 +1,92 @@
-import { readFile, writeFile } from "fs/promises";
-import lodash from "lodash";
-const envFile = "./app/web/.env";
-const { startsWith } = lodash;
+import { readFile, writeFile } from "node:fs/promises";
 
-let cdkOutputData = {};
+const cdkInfraFile = "./cdk-infra.json";
 
-async function append(data) {
-  await writeFile(envFile, data, { flag: "a" }, (err) => {
-    if (err) {
-      // eslint-disable-next-line no-console
-      console.error(err);
-      return;
-    }
-  });
+// Stage → stack-name prefix map (mirrors config.ts → stagePrefixMap)
+const stagePrefixMap = { dev: "dev", qa: "qa", prod: "pr" };
+
+// Parse --stage=<s> from argv (optional)
+const stageArg = process.argv
+  .find((a) => a.startsWith("--stage="))
+  ?.split("=")[1];
+
+if (stageArg && !stagePrefixMap[stageArg]) {
+  console.error(
+    `Invalid --stage "${stageArg}". Valid stages: ${Object.keys(
+      stagePrefixMap
+    ).join(", ")}`
+  );
+  process.exit(1);
 }
 
-async function buildWebAppEnv() {
-  let data = await readFile(new URL("./cdk-infra.json", import.meta.url));
-  cdkOutputData = data ? JSON.parse(data) : {};
-  let stageKeys = {};
+// When a stage is given, write to app/web/.env.<stage>; otherwise app/web/.env.
+// Vite picks up .env.<mode> when built with `vite build --mode <mode>`.
+const envFile = stageArg ? `./app/web/.env.${stageArg}` : "./app/web/.env";
 
-  Object.keys(cdkOutputData).every((key) => {
-    if (startsWith(key, "graphApp-Api")) {
-      stageKeys = cdkOutputData[key];
-      return false;
-    }
-    return true;
-  });
-  Object.keys(stageKeys).forEach((key) => {
-    key.includes("cognitoUserPoolId")
-      ? append(`VITE_COGNITO_USERPOOLID=${stageKeys[key]}\n`)
-      : "";
-    key.includes("cognitoUserPoolClientId")
-      ? append(`VITE_COGNITO_USERPOLL_CLIENTID=${stageKeys[key]}\n`)
-      : "";
-    key.includes("cognitoIdentityPoolId")
-      ? append(`VITE_COGNITO_IDENTITYPOOLID=${stageKeys[key]}\n`)
-      : "";
-    key.includes("apiGraphqlUrl")
-      ? append(`VITE_GRAPHQL_URL=${stageKeys[key]}\n`)
-      : "";
-    key.includes("region")
-      ? append(`VITE_COGNITO_REGION=${stageKeys[key]}\n`)
-      : "";
-  });
+// Map CDK output key prefixes → Vite env var names. CDK appends a hash suffix
+// (e.g. cognitoUserPoolId6319077E) so we match on startsWith, and order
+// cognitoUserPoolClientId before cognitoUserPoolId since it's more specific.
+// Optional `transform` lets us shape the value (e.g. prefix https:// on a
+// bare CloudFront domain).
+const mapping = [
+  { match: "cognitoUserPoolClientId", env: "VITE_COGNITO_USERPOLL_CLIENTID" },
+  { match: "cognitoUserPoolId", env: "VITE_COGNITO_USERPOOLID" },
+  { match: "cognitoIdentityPoolId", env: "VITE_COGNITO_IDENTITYPOOLID" },
+  { match: "apiGraphqlUrl", env: "VITE_GRAPHQL_URL" },
+  {
+    match: "mediaMediaDomain",
+    env: "VITE_MEDIA_CLOUDFRONT_URL",
+    transform: (v) => `https://${v}`,
+  },
+  { match: "mediaMediaBucketName", env: "VITE_MEDIA_BUCKET_NAME" },
+  // Deployment metadata (CfnOutputs from ApiStack). These let the frontend
+  // know which AWS account/region/stage its backend lives in — important
+  // when stages target different AWS accounts.
+  { match: "deployAccount", env: "VITE_AWS_ACCOUNT_ID" },
+  { match: "deployRegion", env: "VITE_COGNITO_REGION" },
+  { match: "deployStage", env: "VITE_STAGE" },
+];
+
+const raw = await readFile(cdkInfraFile, "utf8");
+const cdkOutputs = JSON.parse(raw);
+
+// Find the ApiStack for the requested stage (e.g. dev → dev-mucker-ApiStack)
+// or fall back to the first *-ApiStack if no stage was specified.
+const wantedPrefix = stageArg ? `${stagePrefixMap[stageArg]}-` : "";
+const apiStackKey = Object.keys(cdkOutputs).find(
+  (k) => k.startsWith(wantedPrefix) && k.endsWith("-ApiStack")
+);
+if (!apiStackKey) {
+  const hint = stageArg
+    ? `for stage "${stageArg}" (expected ${stagePrefixMap[stageArg]}-*-ApiStack)`
+    : "";
+  console.error(
+    `No *-ApiStack entry found in ${cdkInfraFile} ${hint}. Deploy the backend first.`
+  );
+  process.exit(1);
 }
 
-await writeFile(envFile, "", { flag: "w+" }, (err) => {
-  if (err) {
-    console.error(err);
-    return;
+const stackOutputs = cdkOutputs[apiStackKey];
+const lines = [];
+
+for (const [outputKey, value] of Object.entries(stackOutputs)) {
+  for (const { match, env, transform } of mapping) {
+    if (outputKey.startsWith(match)) {
+      lines.push(`${env}=${transform ? transform(value) : value}`);
+      break;
+    }
   }
-});
+}
 
-await buildWebAppEnv();
+// Safety net: if a pre-existing deploy didn't emit deployRegion yet, fall
+// back to the AWS env vars so the .env still has VITE_COGNITO_REGION.
+if (!lines.some((l) => l.startsWith("VITE_COGNITO_REGION="))) {
+  const region =
+    process.env.CDK_DEFAULT_REGION || process.env.AWS_REGION || "us-east-1";
+  lines.push(`VITE_COGNITO_REGION=${region}`);
+}
+
+await writeFile(envFile, lines.join("\n") + "\n", "utf8");
+console.log(
+  `Wrote ${lines.length} env vars to ${envFile} (from ${apiStackKey})`
+);

@@ -1,6 +1,9 @@
 !jest.config.js
 node_modules
 
+# Local secrets / per-stage config (committed: .env.sample)
+.env
+.env.local
 
 # CDK asset staging directory
 .cdk.staging

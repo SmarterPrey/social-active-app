@@ -2,12 +2,21 @@ name: Deploy to AWS
 
 on:
   push:
-    branches: [main]
+    branches: [dev, qa, main]
     paths-ignore:
       - '**/*.md'
       - '.github/workflows/**'
   workflow_dispatch:
     inputs:
+      stage:
+        description: 'Deployment stage'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
       deploy-target:
         description: 'What to deploy'
         required: true
@@ -36,12 +45,14 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Determine which stacks need deploying
+  # Determine stage and which stacks need deploying
   # ---------------------------------------------------------------------------
   detect-changes:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
+      stage: ${{ steps.resolve-stage.outputs.stage }}
+      stage-prefix: ${{ steps.resolve-stage.outputs.stage-prefix }}
       deploy-backend: ${{ steps.decide.outputs.deploy-backend }}
       deploy-frontend: ${{ steps.decide.outputs.deploy-frontend }}
     steps:
@@ -49,6 +60,31 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
+
+      - name: Resolve stage from branch
+        id: resolve-stage
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            STAGE="${{ inputs.stage }}"
+          else
+            BRANCH="${{ github.ref_name }}"
+            case "$BRANCH" in
+              dev)  STAGE="dev" ;;
+              qa)   STAGE="qa" ;;
+              main) STAGE="prod" ;;
+              *)    echo "::error::Unsupported branch '$BRANCH' — no stage mapping."; exit 1 ;;
+            esac
+          fi
+
+          case "$STAGE" in
+            dev)  PREFIX="dev" ;;
+            qa)   PREFIX="qa" ;;
+            prod) PREFIX="pr" ;;
+          esac
+
+          echo "stage=$STAGE"         >> $GITHUB_OUTPUT
+          echo "stage-prefix=$PREFIX" >> $GITHUB_OUTPUT
+          echo "Resolved stage: **$STAGE** (prefix: **$PREFIX**)" >> $GITHUB_STEP_SUMMARY
 
       - name: Determine deploy targets
         id: decide
@@ -133,7 +169,7 @@ jobs:
       - name: Deploy backend stacks
         id: deploy
         run: |
-          npm run deployBackend -- --all
+          npm run deployBackend -- --all -c stage=${{ needs.detect-changes.outputs.stage }}
           echo "completed=true" >> $GITHUB_OUTPUT
 
       - name: Upload backend outputs
@@ -188,9 +224,11 @@ jobs:
           echo "Attempting to use cdk-infra.json..."
           if [ ! -f cdk-infra.json ]; then
             echo "No local artifact — fetching outputs from CloudFormation..."
+            STAGE_PREFIX="${{ needs.detect-changes.outputs.stage-prefix }}"
+            APP_NAME="${STAGE_PREFIX}-mucker"
             # Build a minimal cdk-infra.json from live stack outputs
             aws cloudformation describe-stacks --region ${{ env.AWS_REGION }} \
-              --query 'Stacks[?starts_with(StackName, `socialActiveApp-`)].{StackName: StackName, Outputs: Outputs}' \
+              --query "Stacks[?starts_with(StackName, \`${APP_NAME}-\`)].{StackName: StackName, Outputs: Outputs}" \
               --output json > cdk-infra-raw.json
             node -e "
               const raw = require('./cdk-infra-raw.json');
@@ -214,13 +252,15 @@ jobs:
         run: npm run generateEnv
 
       - name: Deploy frontend stack
-        run: npm run deployFrontend -- --all
+        run: npm run deployFrontend -- -c stage=${{ needs.detect-changes.outputs.stage }}
 
       - name: Extract and display outputs
         id: outputs
         run: |
+          STAGE_PREFIX="${{ needs.detect-changes.outputs.stage-prefix }}"
+          APP_NAME="${STAGE_PREFIX}-mucker"
           CLOUDFRONT_URL=$(aws cloudformation describe-stacks \
-            --stack-name socialActiveApp-WebappStack \
+            --stack-name "${APP_NAME}-WebappStack" \
             --region ${{ env.AWS_REGION }} \
             --query 'Stacks[0].Outputs[?OutputKey==`webappurl4CF7BBD7`].OutputValue' \
             --output text 2>/dev/null || echo "N/A")
@@ -262,7 +302,9 @@ jobs:
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stage**: \`${{ needs.detect-changes.outputs.stage }}\` (prefix: \`${{ needs.detect-changes.outputs.stage-prefix }}\`)" >> $GITHUB_STEP_SUMMARY
           echo "- **Trigger**: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **AWS Account**: ${{ env.AWS_ACCOUNT_ID }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Region**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY

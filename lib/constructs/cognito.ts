@@ -63,7 +63,6 @@ export class Cognito extends Construct {
     // Fallback sign-in URL. Callers should override via `appSignInUrl`.
     const signInUrl = props.appSignInUrl ?? "https://app.mucker.io/signin";
     const inviteHtml = renderInviteEmailHtml(signInUrl);
-    const inviteSms = `Social Active App: welcome {username}. Temporary password: {####}. Sign in at ${signInUrl} to set your own password.`;
     const inviteSubject = "You're invited to Social Active App";
 
     // EmailConfiguration: default is Cognito-managed (sandboxy). If caller
@@ -88,7 +87,7 @@ export class Cognito extends Construct {
         username: true,
         email: true,
       },
-      accountRecovery: aws_cognito.AccountRecovery.EMAIL_ONLY,
+      accountRecovery: aws_cognito.AccountRecovery.EMAIL_ONLY, // overridden by addOverride below to include admin_only
       removalPolicy: RemovalPolicy.DESTROY,
       selfSignUpEnabled: true,
       // advancedSecurityMode is deprecated. Use StandardThreatProtectionMode and CustomThreatProtectionMode instead.
@@ -110,22 +109,31 @@ export class Cognito extends Construct {
     // from ever calling UpdateUserPool by ensuring zero-diff between templates, regardless
     // of CDK version changes that might otherwise add new default properties.
     (this.userPool.node.defaultChild as aws_cognito.CfnUserPool).addOverride("Properties", {
-      AccountRecoverySetting: { RecoveryMechanisms: [{ Name: "verified_email", Priority: 1 }] },
+      AccountRecoverySetting: {
+        RecoveryMechanisms: [
+          { Name: "verified_email", Priority: 1 },
+          // Cognito requires a second recovery mechanism when EMAIL_OTP MFA is
+          // enabled — admin_only cannot be combined with others, so we add
+          // verified_phone_number as Priority 2. Users who haven't set a phone
+          // number simply won't see that recovery option.
+          { Name: "verified_phone_number", Priority: 2 },
+        ],
+      },
       AdminCreateUserConfig: {
         AllowAdminCreateUserOnly: false,
         InviteMessageTemplate: {
           EmailSubject: inviteSubject,
           EmailMessage: inviteHtml,
-          SMSMessage: inviteSms,
         },
       },
       AliasAttributes: ["email"],
       AutoVerifiedAttributes: ["email"],
       EmailConfiguration: emailConfiguration,
-      // MFA: optional, user can enroll email or SMS. Device tracking below
-      // means trusted devices skip the MFA challenge on subsequent sign-ins.
+      // MFA: optional, user can enroll email OTP. SMS_MFA removed — it requires
+      // an SmsConfiguration IAM role/external ID which adds operational overhead
+      // and EMAIL_OTP covers the same use case.
       MfaConfiguration: "OPTIONAL",
-      EnabledMfas: ["SMS_MFA", "EMAIL_OTP"],
+      EnabledMfas: ["EMAIL_OTP"],
       DeviceConfiguration: {
         ChallengeRequiredOnNewDevice: true,
         DeviceOnlyRememberedOnUserPrompt: true,
@@ -137,14 +145,12 @@ export class Cognito extends Construct {
         { AttributeDataType: "String", Mutable: true, Name: "organization" },
         { AttributeDataType: "String", Mutable: true, Name: "theme" },
       ],
-      SmsVerificationMessage: "The verification code to your new account is {####}",
       UserPoolAddOns: { AdvancedSecurityMode: "ENFORCED" },
       UserPoolName: "cognito-app-userpool",
       VerificationMessageTemplate: {
         DefaultEmailOption: "CONFIRM_WITH_CODE",
         EmailMessage: "The verification code to your new account is {####}",
         EmailSubject: "Verify your new account",
-        SmsMessage: "The verification code to your new account is {####}",
       },
     });
 

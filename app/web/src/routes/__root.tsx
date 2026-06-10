@@ -18,7 +18,6 @@ const PUBLIC_PATH_PREFIXES = ["/rsvp", "/apply"];
 function Root() {
   const auth = useAuthStore();
   const [showSignIn, setShowSignIn] = useState(false);
-  // @ts-ignore — TanStack Router deep type instantiation (TS2589)
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isPublicPath = PUBLIC_PATH_PREFIXES.some((p) => pathname.startsWith(p));
 

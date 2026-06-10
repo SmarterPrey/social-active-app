@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+/**
+ * Shared DNS stack — deployed ONCE per AWS account/region.
+ * All stages (dev, qa, prod) share a single Route 53 hosted zone and
+ * SES domain identity for mucker.io. Deploy with:
+ *
+ *   npm run deployDns -- --profile <PROFILE>
+ */
+require("source-map-support/register");
+const dotenv = require("dotenv");
+dotenv.config();
+const cdk = require("aws-cdk-lib");
+const cdk_nag_1 = require("cdk-nag");
+const dns_stack_1 = require("../lib/dns-stack");
+const config_1 = require("../config");
+const NagLogger_1 = require("../nag/NagLogger");
+const app = new cdk.App();
+const logger = new NagLogger_1.NagLogger();
+cdk.Aspects.of(app).add(new cdk_nag_1.AwsSolutionsChecks({ verbose: true, additionalLoggers: [logger] }));
+// DnsStack is shared. Account comes from PROD_ACCOUNT_ID by default since
+// the hosted zone usually lives in the prod (production-of-record) account.
+const env = {
+    account: process.env.PROD_ACCOUNT_ID ||
+        process.env.CDK_DEFAULT_ACCOUNT ||
+        process.env.AWS_ACCOUNT_ID,
+    region: config_1.deployConfig.region || process.env.CDK_DEFAULT_REGION,
+};
+// Intentionally no stage prefix — this stack is shared across all stages.
+new dns_stack_1.DnsStack(app, "mucker-DnsStack", {
+    domainName: config_1.deployConfig.domainName,
+    createSesEmailIdentity: true,
+    env,
+});
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiZG5zLmpzIiwic291cmNlUm9vdCI6IiIsInNvdXJjZXMiOlsiZG5zLnRzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7OztBQUNBOzs7Ozs7R0FNRztBQUNILHVDQUFxQztBQUNyQyxpQ0FBaUM7QUFDakMsTUFBTSxDQUFDLE1BQU0sRUFBRSxDQUFDO0FBQ2hCLG1DQUFtQztBQUNuQyxxQ0FBNkM7QUFDN0MsZ0RBQTRDO0FBRTVDLHNDQUF5QztBQUN6QyxnREFBNkM7QUFFN0MsTUFBTSxHQUFHLEdBQUcsSUFBSSxHQUFHLENBQUMsR0FBRyxFQUFFLENBQUM7QUFDMUIsTUFBTSxNQUFNLEdBQUcsSUFBSSxxQkFBUyxFQUFFLENBQUM7QUFFL0IsR0FBRyxDQUFDLE9BQU8sQ0FBQyxFQUFFLENBQUMsR0FBRyxDQUFDLENBQUMsR0FBRyxDQUNyQixJQUFJLDRCQUFrQixDQUFDLEVBQUUsT0FBTyxFQUFFLElBQUksRUFBRSxpQkFBaUIsRUFBRSxDQUFDLE1BQU0sQ0FBQyxFQUFFLENBQUMsQ0FDdkUsQ0FBQztBQUVGLDBFQUEwRTtBQUMxRSw0RUFBNEU7QUFDNUUsTUFBTSxHQUFHLEdBQUc7SUFDVixPQUFPLEVBQ0wsT0FBTyxDQUFDLEdBQUcsQ0FBQyxlQUFlO1FBQzNCLE9BQU8sQ0FBQyxHQUFHLENBQUMsbUJBQW1CO1FBQy9CLE9BQU8sQ0FBQyxHQUFHLENBQUMsY0FBYztJQUM1QixNQUFNLEVBQUUscUJBQVksQ0FBQyxNQUFNLElBQUksT0FBTyxDQUFDLEdBQUcsQ0FBQyxrQkFBa0I7Q0FDOUQsQ0FBQztBQUVGLDBFQUEwRTtBQUMxRSxJQUFJLG9CQUFRLENBQUMsR0FBRyxFQUFFLGlCQUFpQixFQUFFO0lBQ25DLFVBQVUsRUFBRSxxQkFBWSxDQUFDLFVBQVU7SUFDbkMsc0JBQXNCLEVBQUUsSUFBSTtJQUM1QixHQUFHO0NBQ0osQ0FBQyxDQUFDIiwic291cmNlc0NvbnRlbnQiOlsiIyEvdXNyL2Jpbi9lbnYgbm9kZVxuLyoqXG4gKiBTaGFyZWQgRE5TIHN0YWNrIOKAlCBkZXBsb3llZCBPTkNFIHBlciBBV1MgYWNjb3VudC9yZWdpb24uXG4gKiBBbGwgc3RhZ2VzIChkZXYsIHFhLCBwcm9kKSBzaGFyZSBhIHNpbmdsZSBSb3V0ZSA1MyBob3N0ZWQgem9uZSBhbmRcbiAqIFNFUyBkb21haW4gaWRlbnRpdHkgZm9yIG11Y2tlci5pby4gRGVwbG95IHdpdGg6XG4gKlxuICogICBucG0gcnVuIGRlcGxveURucyAtLSAtLXByb2ZpbGUgPFBST0ZJTEU+XG4gKi9cbmltcG9ydCBcInNvdXJjZS1tYXAtc3VwcG9ydC9yZWdpc3RlclwiO1xuaW1wb3J0ICogYXMgZG90ZW52IGZyb20gXCJkb3RlbnZcIjtcbmRvdGVudi5jb25maWcoKTtcbmltcG9ydCAqIGFzIGNkayBmcm9tIFwiYXdzLWNkay1saWJcIjtcbmltcG9ydCB7IEF3c1NvbHV0aW9uc0NoZWNrcyB9IGZyb20gXCJjZGstbmFnXCI7XG5pbXBvcnQgeyBEbnNTdGFjayB9IGZyb20gXCIuLi9saWIvZG5zLXN0YWNrXCI7XG5cbmltcG9ydCB7IGRlcGxveUNvbmZpZyB9IGZyb20gXCIuLi9jb25maWdcIjtcbmltcG9ydCB7IE5hZ0xvZ2dlciB9IGZyb20gXCIuLi9uYWcvTmFnTG9nZ2VyXCI7XG5cbmNvbnN0IGFwcCA9IG5ldyBjZGsuQXBwKCk7XG5jb25zdCBsb2dnZXIgPSBuZXcgTmFnTG9nZ2VyKCk7XG5cbmNkay5Bc3BlY3RzLm9mKGFwcCkuYWRkKFxuICBuZXcgQXdzU29sdXRpb25zQ2hlY2tzKHsgdmVyYm9zZTogdHJ1ZSwgYWRkaXRpb25hbExvZ2dlcnM6IFtsb2dnZXJdIH0pXG4pO1xuXG4vLyBEbnNTdGFjayBpcyBzaGFyZWQuIEFjY291bnQgY29tZXMgZnJvbSBQUk9EX0FDQ09VTlRfSUQgYnkgZGVmYXVsdCBzaW5jZVxuLy8gdGhlIGhvc3RlZCB6b25lIHVzdWFsbHkgbGl2ZXMgaW4gdGhlIHByb2QgKHByb2R1Y3Rpb24tb2YtcmVjb3JkKSBhY2NvdW50LlxuY29uc3QgZW52ID0ge1xuICBhY2NvdW50OlxuICAgIHByb2Nlc3MuZW52LlBST0RfQUNDT1VOVF9JRCB8fFxuICAgIHByb2Nlc3MuZW52LkNES19ERUZBVUxUX0FDQ09VTlQgfHxcbiAgICBwcm9jZXNzLmVudi5BV1NfQUNDT1VOVF9JRCxcbiAgcmVnaW9uOiBkZXBsb3lDb25maWcucmVnaW9uIHx8IHByb2Nlc3MuZW52LkNES19ERUZBVUxUX1JFR0lPTixcbn07XG5cbi8vIEludGVudGlvbmFsbHkgbm8gc3RhZ2UgcHJlZml4IOKAlCB0aGlzIHN0YWNrIGlzIHNoYXJlZCBhY3Jvc3MgYWxsIHN0YWdlcy5cbm5ldyBEbnNTdGFjayhhcHAsIFwibXVja2VyLURuc1N0YWNrXCIsIHtcbiAgZG9tYWluTmFtZTogZGVwbG95Q29uZmlnLmRvbWFpbk5hbWUsXG4gIGNyZWF0ZVNlc0VtYWlsSWRlbnRpdHk6IHRydWUsXG4gIGVudixcbn0pO1xuIl19

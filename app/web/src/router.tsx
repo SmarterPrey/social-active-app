@@ -5,7 +5,7 @@ import { routeTree } from "./routeTree.gen.js";
 export const router = createRouter({
   routeTree,
   context: {
-    // @ts-ignore
+    // @ts-expect-error — auth is populated at runtime by RouterProvider context
     auth: undefined,
   },
 });

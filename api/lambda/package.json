@@ -9,9 +9,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@aws-sdk/client-neptune": "^3.995.0",
     "@aws-sdk/client-bedrock-runtime": "^3.994.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1035.0",
+    "@aws-sdk/client-neptune": "^3.995.0",
     "@aws-sdk/client-s3": "^3.995.0",
+    "@aws-sdk/client-secrets-manager": "^3.1035.0",
     "@aws-sdk/client-sqs": "^3.995.0",
     "@aws-sdk/s3-request-presigner": "^3.995.0",
     "gremlin": "^3.7.2",

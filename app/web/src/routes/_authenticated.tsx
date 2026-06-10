@@ -35,7 +35,6 @@ export const Route = createFileRoute("/_authenticated")({
     }
 
     throw redirect({
-      // @ts-ignore
       to: "/signin",
     });
   },

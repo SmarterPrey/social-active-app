@@ -46,6 +46,10 @@ export class Media extends Construct {
       encryption: aws_s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
       versioned: false,
+      // CloudFront standard logging writes via the awslogsdelivery canonical
+      // user and requires ACLs. S3's modern default (BUCKET_OWNER_ENFORCED)
+      // disables ACLs, so we opt into BUCKET_OWNER_PREFERRED here.
+      objectOwnership: aws_s3.ObjectOwnership.BUCKET_OWNER_PREFERRED,
       removalPolicy,
       autoDeleteObjects,
     });

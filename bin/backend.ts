@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 import "source-map-support/register";
+import * as dotenv from "dotenv";
+// Load root .env so per-stage account IDs (DEV_ACCOUNT_ID, etc.) are
+// available to getConfig() before any stack is constructed.
+dotenv.config();
 import * as cdk from "aws-cdk-lib";
 import { NeptuneNetworkStack } from "../lib/neptune-network-stack";
 import { ApiStack } from "../lib/api-stack";
 import { WafCloudFrontStack } from "../lib/waf-stack";
 import { ObservabilityStack } from "../lib/observability-stack";
-import { DnsStack } from "../lib/dns-stack";
-import { AwsSolutionsChecks } from "cdk-nag";
+import { AwsSolutionsChecks, NagSuppressions } from "cdk-nag";
 
-import { deployConfig } from "../config";
+import { getConfig, stagePrefixMap } from "../config";
 import { NagLogger } from "../nag/NagLogger";
 
 const app = new cdk.App();
@@ -18,10 +21,21 @@ cdk.Aspects.of(app).add(
   new AwsSolutionsChecks({ verbose: true, additionalLoggers: [logger] })
 );
 
-const appName = deployConfig.appName || "socialActiveApp";
+const stage = app.node.tryGetContext("stage") ?? "dev";
+if (!stagePrefixMap[stage]) {
+  throw new Error(`Invalid stage "${stage}". Valid stages: ${Object.keys(stagePrefixMap).join(", ")}`);
+}
+const stagePrefix = stagePrefixMap[stage]; // dev→dev, qa→qa, prod→pr
+const config = getConfig(stage);
+
+/** Stack/resource name prefix: dev-mucker, qa-mucker, pr-mucker */
+const appName = `${stagePrefix}-${config.appName.toLowerCase()}`;
 const env = {
-  account: process.env.CDK_DEFAULT_ACCOUNT || process.env.AWS_ACCOUNT_ID,
-  region: deployConfig.region || process.env.CDK_DEFAULT_REGION,
+  account:
+    config.account ||
+    process.env.CDK_DEFAULT_ACCOUNT ||
+    process.env.AWS_ACCOUNT_ID,
+  region: config.region || process.env.CDK_DEFAULT_REGION,
 };
 const neptuneNetwork = new NeptuneNetworkStack(
   app,
@@ -50,41 +64,32 @@ const neptuneNetwork = new NeptuneNetworkStack(
   }
 );
 
-// ── DNS + SES identity (must exist before Cognito references it) ───
-const dnsStack = new DnsStack(app, `${appName}-DnsStack`, {
-  domainName: deployConfig.domainName,
-  createSesEmailIdentity: true,
-  env,
-});
-
-// Deterministic ARN of the SES domain identity created above. Cognito
-// references it by ARN, so we also add an explicit stack dependency to
-// guarantee the identity exists before the user pool is created/updated.
-const sesIdentityArn = `arn:aws:ses:${env.region}:${env.account}:identity/${deployConfig.domainName}`;
+// SES identity ARN is deterministic — the shared mucker-DnsStack
+// (bin/dns.ts) creates this identity once for all stages.
+const sesIdentityArn = `arn:aws:ses:${env.region}:${env.account}:identity/${config.domainName}`;
 
 const apiStack = new ApiStack(app, `${appName}-ApiStack`, {
   cognito: {
-    adminEmail: deployConfig.adminEmail,
-    appSignInUrl: `${deployConfig.appUrl}/signin`,
+    adminEmail: config.adminEmail,
+    appSignInUrl: `${config.appUrl}/signin`,
     ses: {
       sourceArn: sesIdentityArn,
-      fromAddress: deployConfig.email.fromAddress,
-      fromName: deployConfig.email.fromName,
-      replyToEmailAddress: deployConfig.email.replyTo,
+      fromAddress: config.email.fromAddress,
+      fromName: config.email.fromName,
+      replyToEmailAddress: config.email.replyTo,
     },
   },
   vpc: neptuneNetwork.vpc,
   cluster: neptuneNetwork.cluster,
   clusterRole: neptuneNetwork.neptuneRole,
   graphqlFieldName: ["getGraph", "getProfile", "getRelationName", "insertData", "askGraph", "searchEntities", "getEntityProperties", "getEntityEdges", "searchProjects", "getProjectAccounts", "addProjectAccount", "deleteProjectAccount", "inviteMember"],
-  s3Uri: deployConfig.s3Uri,
+  s3Uri: config.s3Uri,
   env,
 });
-apiStack.addDependency(dnsStack);
 
 new WafCloudFrontStack(app, `${appName}-WafStack`, {
-  allowedIps: deployConfig.allowedIps,
-  wafParamName: deployConfig.wafParamName,
+  allowedIps: config.allowedIps,
+  wafParamName: config.wafParamName,
   env: {
     ...env,
     region: "us-east-1",
@@ -95,7 +100,7 @@ new WafCloudFrontStack(app, `${appName}-WafStack`, {
 const observability = new ObservabilityStack(app, `${appName}-ObservabilityStack`, {
   neptuneClusterId: neptuneNetwork.cluster.clusterIdentifier,
   cloudFrontDistributionId: "PLACEHOLDER", // Resolved at deploy via SSM or manual update
-  wafWebAclName: deployConfig.wafParamName,
+  wafWebAclName: config.wafParamName,
   appSyncApiId: apiStack.graphqlApiId,
   lambdaFunctions: apiStack.lambdaFunctionNames,
   userPoolId: apiStack.cognito.cognitoParams.userPoolId,
@@ -196,7 +201,7 @@ authRole.addToPrincipalPolicy(
     sid: "MonitoringSSMBastionParams",
     effect: cdk.aws_iam.Effect.ALLOW,
     actions: ["ssm:GetParameter", "ssm:PutParameter"],
-    resources: [`arn:aws:ssm:${env.region}:${env.account}:parameter/socialActiveApp/bastion/*`],
+    resources: [`arn:aws:ssm:${env.region}:${env.account}:parameter/${appName}/bastion/*`],
   })
 );
 authRole.addToPrincipalPolicy(
@@ -212,4 +217,21 @@ authRole.addToPrincipalPolicy(
   })
 );
 
-// DnsStack is created above so Cognito can reference the SES identity it creates.
+// Suppress IAM5 for the SSM bastion parameter path. The wildcard is scoped to
+// /${appName}/bastion/* because the bastion instance ID is not known at synth
+// time — it is written/read dynamically at runtime.
+NagSuppressions.addResourceSuppressions(
+  authRole,
+  [
+    {
+      id: "AwsSolutions-IAM5",
+      reason:
+        "SSM parameter path wildcard is scoped to /${appName}/bastion/* — the bastion instance ID is written at runtime so a fully-qualified ARN cannot be used at synth time.",
+      appliesTo: [
+        `Resource::arn:aws:ssm:${env.region}:${env.account}:parameter/${appName}/bastion/*`,
+      ],
+    },
+  ],
+  true // applyToChildren — targets the DefaultPolicy on the role
+);
+

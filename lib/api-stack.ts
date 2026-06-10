@@ -1,4 +1,4 @@
-import { Stack, StackProps, Duration, aws_ec2, aws_iam } from "aws-cdk-lib";
+import { Stack, StackProps, Duration, CfnOutput, aws_ec2, aws_iam } from "aws-cdk-lib";
 import { Construct } from "constructs";
 
 import { Cognito } from "./constructs/cognito";
@@ -74,5 +74,13 @@ export class ApiStack extends Stack {
     this.graphqlUrl = api.graphqlUrl;
     this.graphqlApiId = api.graphqlApiId;
     this.lambdaFunctionNames = api.lambdaFunctionNames;
+
+    // Surface deployment account/region/stage so generateEnv can write them
+    // into the frontend .env (handles per-stage cross-account deployments).
+    new CfnOutput(this, "deployAccount", { value: this.account });
+    new CfnOutput(this, "deployRegion", { value: this.region });
+    new CfnOutput(this, "deployStage", {
+      value: this.node.tryGetContext("stage") ?? "dev",
+    });
   }
 }
