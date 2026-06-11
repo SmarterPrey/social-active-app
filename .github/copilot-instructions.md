@@ -24,6 +24,11 @@ pnpm build                # TypeScript + Vite production build
 pnpm lint                 # ESLint
 ```
 
+### AWS CLI Usage
+- For all AWS CLI commands, always disable paging.
+- Always include `--no-cli-pager` in the command.
+- Also set `AWS_PAGER=""` when running commands in terminal sessions.
+
 ### Pitfalls
 - `config.ts` is git-ignored — copy from `config.sample.ts` for local setup
 - Backend and frontend are **separate CDK apps** with separate entry points (`bin/backend.ts`, `bin/frontend.ts`)
