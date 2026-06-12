@@ -18,6 +18,8 @@ interface NeptuneScheduleConfig {
 }
 
 interface NeptuneNetworkStackProps extends StackProps {
+  /** App name prefix used for resource naming (e.g. "pr-mucker") */
+  appName: string;
   natSubnet?: boolean;
   maxAz: number;
   neptuneServerlss: boolean;
@@ -42,6 +44,7 @@ export class NeptuneNetworkStack extends Stack {
     super(scope, id, props);
 
     const {
+      appName,
       natSubnet,
       maxAz,
       neptuneServerlss,
@@ -70,6 +73,7 @@ export class NeptuneNetworkStack extends Stack {
       new Bastion(this, "bastion", {
         vpc: this.vpc,
         cluster: this.cluster,
+        appName,
         timezone: bastionConfig.timezone,
         stopHour: bastionConfig.stopHour,
       });
@@ -79,6 +83,7 @@ export class NeptuneNetworkStack extends Stack {
     if (neptuneSchedule?.enabled) {
       new NeptuneScheduler(this, "neptune-scheduler", {
         cluster: this.cluster,
+        appName,
         timezone: neptuneSchedule.timezone,
         stopHour: neptuneSchedule.stopHour,
       });
@@ -201,7 +206,7 @@ export class NeptuneNetworkStack extends Stack {
 
     // EventBridge rule: EC2 instance state-change (started / stopped)
     new aws_events.Rule(this, "EC2InstanceStateChangeRule", {
-      ruleName: "ec2-instance-state-change-notifications",
+      ruleName: `${appName}-ec2-instance-state-change-notifications`,
       description:
         "Send email when any EC2 instance in us-east-1 is started or stopped",
       eventPattern: {

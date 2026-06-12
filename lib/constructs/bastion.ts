@@ -17,6 +17,8 @@ import * as path from "node:path";
 interface BastionProps extends StackProps {
   vpc: aws_ec2.Vpc;
   cluster: neptune.DatabaseCluster;
+  /** App name prefix used for SSM parameter paths and scheduler names (e.g. "pr-mucker") */
+  appName: string;
   /** IANA timezone for the auto-stop schedule (default: America/Los_Angeles) */
   timezone?: string;
   /** Cron hour (0-23) to stop the bastion (default: 0 = midnight) */
@@ -29,7 +31,7 @@ export class Bastion extends Construct {
   constructor(scope: Construct, id: string, props: BastionProps) {
     super(scope, id);
 
-    const { vpc, cluster, timezone = "America/Los_Angeles", stopHour = 0 } =
+    const { vpc, cluster, appName, timezone = "America/Los_Angeles", stopHour = 0 } =
       props;
 
     // -----------------------------------------------------------------------
@@ -81,22 +83,22 @@ export class Bastion extends Construct {
     const bastionSg = this.instance.connections.securityGroups[0];
 
     new aws_ssm.StringParameter(this, "bastion-instance-id-param", {
-      parameterName: "/socialActiveApp/bastion/instance-id",
+      parameterName: `/${appName}/bastion/instance-id`,
       stringValue: this.instance.instanceId,
       description: "Current bastion host EC2 instance ID",
     });
     new aws_ssm.StringParameter(this, "bastion-subnet-id-param", {
-      parameterName: "/socialActiveApp/bastion/subnet-id",
+      parameterName: `/${appName}/bastion/subnet-id`,
       stringValue: vpc.publicSubnets[0].subnetId,
       description: "Public subnet for bastion host recreation",
     });
     new aws_ssm.StringParameter(this, "bastion-sg-id-param", {
-      parameterName: "/socialActiveApp/bastion/security-group-id",
+      parameterName: `/${appName}/bastion/security-group-id`,
       stringValue: bastionSg.securityGroupId,
       description: "Security group for bastion host (allows Neptune access)",
     });
     new aws_ssm.StringParameter(this, "bastion-profile-name-param", {
-      parameterName: "/socialActiveApp/bastion/instance-profile-name",
+      parameterName: `/${appName}/bastion/instance-profile-name`,
       stringValue: cfnInstanceProfile.ref,
       description: "IAM instance profile name for SSM-managed bastion",
     });
@@ -166,7 +168,7 @@ export class Bastion extends Construct {
     // Schedule: stop bastion daily at the configured hour
     // -----------------------------------------------------------------------
     new aws_scheduler.CfnSchedule(this, "bastion-stop-schedule", {
-      name: "bastion-stop-schedule",
+      name: `${appName}-bastion-stop-schedule`,
       description: `Stop bastion host at ${stopHour}:00 ${timezone}`,
       scheduleExpressionTimezone: timezone,
       scheduleExpression: `cron(0 ${stopHour} * * ? *)`,

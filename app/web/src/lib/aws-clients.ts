@@ -206,7 +206,7 @@ export async function putSsmParameter(name: string, value: string): Promise<void
 
 // ─── Bastion instance creation ─────────────────────────────────────────
 
-const BASTION_PARAM_PREFIX = "/socialActiveApp/bastion";
+const BASTION_PARAM_PREFIX = `/${import.meta.env.VITE_APP_NAME}/bastion`;
 
 /**
  * Reads the launch config from SSM, creates a new t3.nano bastion host,

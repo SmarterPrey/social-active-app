@@ -41,6 +41,7 @@ const neptuneNetwork = new NeptuneNetworkStack(
   app,
   `${appName}-NeptuneNetworkStack`,
   {
+    appName,
     natSubnet: false,
     maxAz: 2,
     neptuneServerlss: true,

@@ -16,6 +16,8 @@ import * as path from "path";
 
 interface NeptuneSchedulerProps extends StackProps {
   cluster: neptune.DatabaseCluster;
+  /** App name prefix used for scheduler names (e.g. "pr-mucker") */
+  appName: string;
   /** IANA timezone for the schedule (default: America/Los_Angeles) */
   timezone?: string;
   /** Cron hour (0-23) to stop the cluster in the given timezone (default: 0 = midnight) */
@@ -28,6 +30,7 @@ export class NeptuneScheduler extends Construct {
 
     const {
       cluster,
+      appName,
       timezone = "America/Los_Angeles",
       stopHour = 0,
     } = props;
@@ -148,7 +151,7 @@ export class NeptuneScheduler extends Construct {
 
     // Stop Neptune at the configured hour (default: midnight Pacific)
     new aws_scheduler.CfnSchedule(this, "stop-schedule", {
-      name: "neptune-stop-schedule",
+      name: `${appName}-neptune-stop-schedule`,
       description: `Stop Neptune cluster at ${stopHour}:00 ${timezone}`,
       scheduleExpressionTimezone: timezone,
       scheduleExpression: `cron(0 ${stopHour} * * ? *)`,

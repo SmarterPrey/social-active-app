@@ -69,7 +69,7 @@ export const Route = createFileRoute("/_authenticated/_layout/monitoring")({
 // ─── Known resource identifiers ──────────────────────────────────────
 // TODO: After first deploy, replace these with the actual values from
 // `cdk-infra.json` (or wire them up to read from CDK outputs at build time).
-const BASTION_SSM_PARAM = "/socialActiveApp/bastion/instance-id";
+const BASTION_SSM_PARAM = `/${import.meta.env.VITE_APP_NAME}/bastion/instance-id`;
 const NEPTUNE_CLUSTER_ID = "TODO-replace-after-first-deploy";
 
 /** Actual deployed Lambda function names (from CloudFormation outputs) */

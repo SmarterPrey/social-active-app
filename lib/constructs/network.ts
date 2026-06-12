@@ -1,4 +1,4 @@
-import { RemovalPolicy, StackProps, aws_ec2, aws_logs } from "aws-cdk-lib";
+import { RemovalPolicy, Stack, StackProps, aws_ec2, aws_logs } from "aws-cdk-lib";
 import { NagSuppressions } from "cdk-nag";
 
 import { Construct } from "constructs";
@@ -14,7 +14,7 @@ export class Network extends Construct {
     const { natSubnet, maxAz } = props;
 
     const cwLogs = new aws_logs.LogGroup(this, "vpc-logs", {
-      logGroupName: `/${id}/vpc-logs/`,
+      logGroupName: `/${Stack.of(this).stackName}/${id}/vpc-logs/`,
       removalPolicy: RemovalPolicy.DESTROY,
       retention: aws_logs.RetentionDays.TWO_MONTHS,
     });
