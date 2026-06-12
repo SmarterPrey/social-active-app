@@ -69,7 +69,46 @@ using AWS OIDC (no long-term credentials in GitHub).
 1. **AWS OIDC provider + role**
    - Create an IAM OIDC identity provider for `token.actions.githubusercontent.com`
    - Create a role (default name `GitHubActionsDeployRole`) with a trust policy
-     scoped to `repo:SmarterPrey/social-active-app:*`
+     that allows this repo on the deployment branches used by
+     `.github/workflows/deploy.yml` (`dev`, `qa`, `main`):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Principal": {
+           "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+         },
+         "Action": "sts:AssumeRoleWithWebIdentity",
+         "Condition": {
+           "StringEquals": {
+             "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+           },
+           "StringLike": {
+             "token.actions.githubusercontent.com:sub": [
+               "repo:SmarterPrey/social-active-app:ref:refs/heads/dev",
+               "repo:SmarterPrey/social-active-app:ref:refs/heads/qa",
+               "repo:SmarterPrey/social-active-app:ref:refs/heads/main"
+             ]
+           }
+         }
+       }
+     ]
+   }
+   ```
+
+   Update an existing role in-place:
+
+   ```bash
+   aws iam update-assume-role-policy \
+     --role-name GitHubActionsDeployRole \
+     --policy-document file://trust-policy.json
+   ```
+
+   If you run `workflow_dispatch` from other branches, add those refs to the
+   `sub` list (or widen the pattern deliberately).
    - Attach `PowerUserAccess` (or a tighter custom policy covering CloudFormation,
      Neptune, VPC, Lambda, AppSync, Cognito, S3, CloudFront, WAF, IAM)
 
