@@ -228,7 +228,7 @@ export class WAF extends wafv2.CfnWebACL {
         },
       },
       scope: distScope,
-      name: `${id}-waf`,
+      name: `${cdk.Stack.of(scope).stackName}-waf`,
       rules: wafRules.map((wafRule) => wafRule.rule),
     });
   }
