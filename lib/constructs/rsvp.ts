@@ -90,6 +90,7 @@ export class Rsvp extends Construct {
       timeout: Duration.seconds(30),
       role,
       entry: "./api/lambda/rsvpEmailer.ts",
+      depsLockFilePath: "./api/lambda/package-lock.json",
       environment: {
         RSVP_BASE_URL: props.rsvpBaseUrl,
         RSVP_FROM_ADDRESS: props.fromAddress,

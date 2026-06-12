@@ -90,6 +90,7 @@ export class Cognito extends Construct {
       accountRecovery: aws_cognito.AccountRecovery.EMAIL_ONLY, // overridden by addOverride below to include admin_only
       removalPolicy: RemovalPolicy.DESTROY,
       selfSignUpEnabled: true,
+      featurePlan: aws_cognito.FeaturePlan.PLUS,
       // advancedSecurityMode is deprecated. Use StandardThreatProtectionMode and CustomThreatProtectionMode instead.
       standardThreatProtectionMode: aws_cognito.StandardThreatProtectionMode.FULL_FUNCTION,
       // customThreatProtectionMode: aws_cognito.CustomThreatProtectionMode.ENABLED, // Uncomment and configure as needed
@@ -108,7 +109,9 @@ export class Cognito extends Construct {
     // Cognito rejects ANY schema field in UpdateUserPool, so we prevent CloudFormation
     // from ever calling UpdateUserPool by ensuring zero-diff between templates, regardless
     // of CDK version changes that might otherwise add new default properties.
-    (this.userPool.node.defaultChild as aws_cognito.CfnUserPool).addOverride("Properties", {
+    const cfnUserPool = this.userPool.node.defaultChild as aws_cognito.CfnUserPool;
+
+    cfnUserPool.addOverride("Properties", {
       AccountRecoverySetting: {
         RecoveryMechanisms: [
           { Name: "verified_email", Priority: 1 },
@@ -153,6 +156,9 @@ export class Cognito extends Construct {
         EmailSubject: "Verify your new account",
       },
     });
+
+    // cdk-nag COG8 checks the L1 `userPoolTier` field directly.
+    cfnUserPool.userPoolTier = aws_cognito.FeaturePlan.PLUS;
 
     const userPoolClient = this.userPool.addClient("webappClient", {
       authFlows: {

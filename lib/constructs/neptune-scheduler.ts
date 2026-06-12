@@ -66,6 +66,14 @@ export class NeptuneScheduler extends Construct {
           "neptuneScheduler",
           "index.ts"
         ),
+        depsLockFilePath: path.join(
+          __dirname,
+          "..",
+          "..",
+          "api",
+          "lambda",
+          "package-lock.json"
+        ),
         handler: "handler",
         timeout: Duration.seconds(30),
         environment: {

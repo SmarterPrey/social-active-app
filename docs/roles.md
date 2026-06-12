@@ -12,6 +12,12 @@ The application uses **Cognito User Pool Groups** to implement role-based access
 
 Roles are defined as Cognito groups in [`lib/constructs/cognito.ts`](../lib/constructs/cognito.ts). The initial admin user (configured via `adminEmail` in [`config.ts`](../config.ts)) is automatically added to the `Admin` group on stack creation.
 
+### Initial Admin Username Note
+
+The bootstrap admin is created with a Cognito username derived from the local part of `adminEmail` (for example, `John` for `john@e-mail.com`).
+
+The sign-in form accepts email aliases, and the password reset flow now attempts both the full email and local username so reset works for bootstrap users and self-registered users.
+
 ## API Authorization
 
 GraphQL authorization is enforced at the AppSync layer via schema directives in [`api/graphql/schema.graphql`](../api/graphql/schema.graphql):

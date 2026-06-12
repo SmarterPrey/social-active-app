@@ -19,6 +19,20 @@ import type { AppRole } from "@/store/useAuthStore";
 
 interface UserAuthFormProps extends React.HTMLAttributes<HTMLDivElement> {}
 
+function getUsernameCandidates(rawValue: string): string[] {
+  const value = rawValue.trim();
+  if (!value) {
+    return [];
+  }
+
+  if (!value.includes("@")) {
+    return [value];
+  }
+
+  const localPart = value.split("@")[0];
+  return Array.from(new Set([value, localPart].filter(Boolean)));
+}
+
 export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -123,12 +137,27 @@ export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
     event.preventDefault();
     setIsLoading(true);
     try {
-      await resetPassword({
-        username: refEmail.current!.value,
-      });
+      const candidates = getUsernameCandidates(refEmail.current!.value);
+      let resolvedUsername = "";
+      let lastError: unknown;
+
+      for (const candidate of candidates) {
+        try {
+          await resetPassword({ username: candidate });
+          resolvedUsername = candidate;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (!resolvedUsername) {
+        throw lastError ?? new Error("Unable to start password reset");
+      }
+
       setIsOpen(!isOpen);
       setIsLoading(false);
-      setResetEmail(refEmail.current!.value);
+      setResetEmail(resolvedUsername);
       setIsRecoveryOpen(!isRecoveryOpen);
     } catch (error) {
       setIsLoading(false);
@@ -145,11 +174,28 @@ export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
     event.preventDefault();
     setIsLoading(true);
     try {
-      await confirmResetPassword({
-        username: resetEmail,
-        confirmationCode: refCode.current!.value,
-        newPassword: refNewPassword.current!.value,
-      });
+      const candidates = getUsernameCandidates(resetEmail);
+      let lastError: unknown;
+      let isConfirmed = false;
+
+      for (const candidate of candidates) {
+        try {
+          await confirmResetPassword({
+            username: candidate,
+            confirmationCode: refCode.current!.value,
+            newPassword: refNewPassword.current!.value,
+          });
+          isConfirmed = true;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (!isConfirmed) {
+        throw lastError ?? new Error("Unable to confirm password reset");
+      }
+
       setIsRecoveryOpen(!isRecoveryOpen);
       setIsLoading(false);
       toast({

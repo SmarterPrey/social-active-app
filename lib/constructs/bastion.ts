@@ -119,6 +119,14 @@ export class Bastion extends Construct {
           "bastionScheduler",
           "index.ts"
         ),
+        depsLockFilePath: path.join(
+          __dirname,
+          "..",
+          "..",
+          "api",
+          "lambda",
+          "package-lock.json"
+        ),
         handler: "handler",
         timeout: Duration.seconds(30),
         environment: {
