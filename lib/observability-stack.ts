@@ -13,6 +13,8 @@ import { NagSuppressions } from "cdk-nag";
 import { ParameterEmailSubscriber } from "./constructs/parameter-email-subscriber";
 
 export interface ObservabilityStackProps extends StackProps {
+  /** App name prefix used for resource naming (e.g. "pr-mucker") */
+  appName: string;
   /** Neptune cluster identifier (e.g. "neptunedbcluster-xxx") */
   neptuneClusterId: string;
   /** CloudFront distribution ID */
@@ -36,6 +38,7 @@ export class ObservabilityStack extends Stack {
     super(scope, id, props);
 
     const {
+      appName,
       neptuneClusterId,
       cloudFrontDistributionId,
       wafWebAclName,
@@ -350,7 +353,7 @@ export class ObservabilityStack extends Stack {
 
     // ─── CloudWatch Dashboard ────────────────────────────────────────
     const dashboard = new aws_cloudwatch.Dashboard(this, "AppDashboard", {
-      dashboardName: "socialActiveApp-Observability",
+      dashboardName: `${appName}-Observability`,
     });
 
     // Header

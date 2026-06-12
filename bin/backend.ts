@@ -99,6 +99,7 @@ new WafCloudFrontStack(app, `${appName}-WafStack`, {
 
 // ── Observability: Dashboard, Alarms, and Cognito read-only policies ──
 const observability = new ObservabilityStack(app, `${appName}-ObservabilityStack`, {
+  appName,
   neptuneClusterId: neptuneNetwork.cluster.clusterIdentifier,
   cloudFrontDistributionId: "PLACEHOLDER", // Resolved at deploy via SSM or manual update
   wafWebAclName: config.wafParamName,
