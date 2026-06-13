@@ -7,6 +7,9 @@ import {
   aws_s3,
   aws_iam,
   aws_cloudfront_origins,
+  aws_certificatemanager,
+  aws_route53,
+  aws_route53_targets,
   DockerImage,
   CfnOutput,
   Stack,
@@ -21,6 +24,19 @@ export interface WebProps extends StackProps {
   webappDistFolder: string;
   wafParamName: string;
   region: string;
+  /**
+   * Custom domain names to serve the webapp on (e.g.
+   * `["mucker.io", "www.mucker.io"]`). All names must belong to the
+   * Route 53 public hosted zone identified by `hostedZoneName`. Leave
+   * empty to serve only on the default `*.cloudfront.net` domain.
+   */
+  domainNames?: string[];
+  /**
+   * The Route 53 public hosted zone name (e.g. `mucker.io`). Required
+   * when `domainNames` is non-empty so the construct can issue an ACM
+   * certificate via DNS validation and create alias records.
+   */
+  hostedZoneName?: string;
   webBucketProps: {
     removalPolicy: RemovalPolicy;
     autoDeleteObjects: boolean;
@@ -32,12 +48,42 @@ export class Web extends Construct {
   constructor(scope: Construct, id: string, props: WebProps) {
     super(scope, id);
 
-    const { webappPath, webappDistFolder, wafParamName, region } = props;
+    const { webappPath, webappDistFolder, wafParamName, region, domainNames, hostedZoneName } = props;
 
     const webAclIdReader = new SSMParameterReader(this, "WebAclIdReader", {
       parameterName: wafParamName,
       region: "us-east-1",
     });
+
+    // ── Custom domain wiring (optional) ─────────────────────────────
+    // If domainNames is provided we look up the existing Route 53
+    // hosted zone, issue a DNS-validated ACM certificate covering all
+    // of those names, and create A/AAAA alias records pointing each
+    // name at the CloudFront distribution. The webapp stack must be
+    // deployed in us-east-1 — required for CloudFront-attached ACM
+    // certificates.
+    let certificate: aws_certificatemanager.ICertificate | undefined;
+    let hostedZone: aws_route53.IHostedZone | undefined;
+    if (domainNames && domainNames.length > 0) {
+      if (!hostedZoneName) {
+        throw new Error(
+          "Web construct: hostedZoneName is required when domainNames is provided"
+        );
+      }
+      hostedZone = aws_route53.HostedZone.fromLookup(this, "HostedZone", {
+        domainName: hostedZoneName,
+      });
+      certificate = new aws_certificatemanager.Certificate(
+        this,
+        "Certificate",
+        {
+          domainName: domainNames[0],
+          subjectAlternativeNames: domainNames.slice(1),
+          validation:
+            aws_certificatemanager.CertificateValidation.fromDns(hostedZone),
+        }
+      );
+    }
 
     // Access logs bucket
     const accessLoggingBucket = new aws_s3.Bucket(
@@ -69,6 +115,9 @@ export class Web extends Construct {
       "cloudFront",
       {
         webAclId: webAclIdReader.getParameterValue(),
+        ...(domainNames && domainNames.length > 0
+          ? { domainNames, certificate }
+          : {}),
         minimumProtocolVersion:
           aws_cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
         enableLogging: true,
@@ -105,6 +154,30 @@ export class Web extends Construct {
     );
 
     this.distribution = cloudFrontWebDistribution;
+
+    // Route 53 alias records for each custom domain → CloudFront
+    if (hostedZone && domainNames && domainNames.length > 0) {
+      const target = aws_route53.RecordTarget.fromAlias(
+        new aws_route53_targets.CloudFrontTarget(cloudFrontWebDistribution)
+      );
+      for (const name of domainNames) {
+        // Use the FQDN as the recordName; CDK strips the zone suffix.
+        // For the apex (`mucker.io`), recordName resolves to the zone
+        // root, which Route 53 represents as an empty/zone-apex record.
+        new aws_route53.ARecord(this, `AliasA-${name}`, {
+          zone: hostedZone,
+          recordName: name,
+          target,
+          comment: `Webapp alias for ${name}`,
+        });
+        new aws_route53.AaaaRecord(this, `AliasAAAA-${name}`, {
+          zone: hostedZone,
+          recordName: name,
+          target,
+          comment: `Webapp alias for ${name}`,
+        });
+      }
+    }
 
     const bucketDeploymentRole = new aws_iam.Role(
       this,

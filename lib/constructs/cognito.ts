@@ -149,7 +149,7 @@ export class Cognito extends Construct {
         { AttributeDataType: "String", Mutable: true, Name: "theme" },
       ],
       UserPoolAddOns: { AdvancedSecurityMode: "ENFORCED" },
-      UserPoolName: "cognito-app-userpool",
+      UserPoolName: `${id}-app-userpool`,
       VerificationMessageTemplate: {
         DefaultEmailOption: "CONFIRM_WITH_CODE",
         EmailMessage: "The verification code to your new account is {####}",

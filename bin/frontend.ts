@@ -34,5 +34,7 @@ const env = {
 const web = new WebappStack(app, `${appName}-WebappStack`, {
   wafParamName: config.wafParamName,
   webBucketsRemovalPolicy: config.webBucketsRemovalPolicy,
+  webDomainNames: config.webDomainNames,
+  hostedZoneName: config.domainName,
   env,
 });

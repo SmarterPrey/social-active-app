@@ -9,8 +9,20 @@ These properties in details are as follows.
 | adminEmail              | Send the temporary password to this email for signing graph application                   | string                         | `your_email@acme.com`                           |
 | allowedIps              | AWS WAF allowed this ips to access to the graph application. e.g.) [`"192.0.3.0/24"`]     | string[]                       | `[]`                                            |
 | wafParamName            | The name of Paramater store in AWS Systems Manager which stores the web acl id of AWS WAF | string                         | `socialActiveAppWafWebACLID`                           |
+| webDomainNames          | Custom domain names served by the webapp's CloudFront distribution. All names must belong to the Route 53 hosted zone identified by `domainName`. Leave empty/undefined to skip cert + alias wiring and serve only on the default `*.cloudfront.net` URL. | string[] (optional)            | `["mucker.io", "www.mucker.io"]` (prod)         |
 | webBucketsRemovalPolicy | Removal policy for S3 buckets                                                             | `RemovalPolicy`                | `RemovalPolicy.DESTROY`                         |
 | s3Uri                   | S3 URI of `vertex.csv` and `edge.csv` which you stored in.                                | { edge: string,vertex: string} | `{edge: "EDGE_S3_URI",vertex: "VERTEX_S3_URI"}` |
+
+## Webapp Custom Domain
+
+When `webDomainNames` is non-empty, the `WebappStack` will:
+
+1. Look up the Route 53 hosted zone identified by `domainName` (must exist — created by `DnsStack`).
+2. Issue a DNS-validated ACM certificate in the deployment region (must be `us-east-1` for CloudFront) covering all `webDomainNames`. The first entry is the cert's primary CN; the rest are SANs.
+3. Attach the certificate and alias names to the CloudFront distribution.
+4. Create A and AAAA alias records in Route 53 for each name → CloudFront.
+
+**Important:** If a manual record (CNAME, A, AAAA) already exists in the hosted zone for any of the configured `webDomainNames`, the stack deployment will fail. Delete the manual record first via `aws route53 change-resource-record-sets` or the console.
 
 ## Neptune Serverless Capacity
 
