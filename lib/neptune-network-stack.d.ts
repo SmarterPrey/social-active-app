@@ -10,6 +10,8 @@ interface NeptuneScheduleConfig {
     stopHour?: number;
 }
 interface NeptuneNetworkStackProps extends StackProps {
+    /** App name prefix used for resource naming (e.g. "pr-mucker") */
+    appName: string;
     natSubnet?: boolean;
     maxAz: number;
     neptuneServerlss: boolean;

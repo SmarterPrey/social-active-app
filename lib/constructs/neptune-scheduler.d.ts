@@ -3,6 +3,8 @@ import * as neptune from "@aws-cdk/aws-neptune-alpha";
 import { Construct } from "constructs";
 interface NeptuneSchedulerProps extends StackProps {
     cluster: neptune.DatabaseCluster;
+    /** App name prefix used for scheduler names (e.g. "pr-mucker") */
+    appName: string;
     /** IANA timezone for the schedule (default: America/Los_Angeles) */
     timezone?: string;
     /** Cron hour (0-23) to stop the cluster in the given timezone (default: 0 = midnight) */

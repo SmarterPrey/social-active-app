@@ -1,6 +1,8 @@
 import { Stack, StackProps } from "aws-cdk-lib";
 import { Construct } from "constructs";
 export interface ObservabilityStackProps extends StackProps {
+    /** App name prefix used for resource naming (e.g. "pr-mucker") */
+    appName: string;
     /** Neptune cluster identifier (e.g. "neptunedbcluster-xxx") */
     neptuneClusterId: string;
     /** CloudFront distribution ID */

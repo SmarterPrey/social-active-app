@@ -6,6 +6,30 @@ Visual design system for Neptune SocialActiveApp, established March 2026.
 
 The interface follows a **dark-native, graph-first** design philosophy. Steel-blue tones replace the generic slate defaults. Inter provides clean geometric typography. The UI recedes to let the graph visualization dominate.
 
+## Public Home Page Narrative
+
+The unauthenticated home page presents Social Active App as an outdoor
+community platform where members:
+
+- register and build profiles with experience, gear, and interests
+- create events for objectives like climbing, running, biking, skiing, and water sports
+- invite trusted partners and grow long-term networks through repeat outings
+
+The page emphasizes a practical journey: profile setup, event creation, and
+trust-network growth, while preserving existing tokens, motion style, and theme
+behavior from the broader design system.
+
+Second pass (Aug 2026) shifts the voice from broad social activity language to
+an alpine/expedition posture:
+
+- objective briefs instead of generic events
+- rope-team trust and route history as primary social proof
+- weather-window and terrain-aware planning language
+
+The background treatment was also updated from an abstract network style to an
+alpine-inspired scene (topographic contour lines plus mountain ridgelines) to
+better match the expedition narrative.
+
 ## Color Palette
 
 All colors are defined as CSS custom properties in `app/web/src/index.css` using HSL values consumed via `hsl(var(--token))`.

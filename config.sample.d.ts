@@ -19,6 +19,12 @@ export type StageConfig = {
     allowedIps: string[];
     /** SSM parameter name storing the WAF WebACL ID — must be unique per stage. */
     wafParamName: string;
+    /**
+     * Custom domain names served by the webapp's CloudFront distribution.
+     * All names must belong to the Route 53 hosted zone identified by
+     * `domainName`. Leave empty to skip cert + alias wiring.
+     */
+    webDomainNames?: string[];
     webBucketsRemovalPolicy: RemovalPolicy;
     s3Uri: {
         edge: string;
