@@ -69,6 +69,11 @@ if (!apiStackKey) {
 const stackOutputs = cdkOutputs[apiStackKey];
 const lines = [];
 
+// Derive the deployment app-name prefix from stack name
+// (e.g. pr-mucker-ApiStack -> pr-mucker).
+const appNameFromStack = apiStackKey.replace(/-ApiStack$/, "");
+lines.push(`VITE_APP_NAME=${appNameFromStack}`);
+
 for (const [outputKey, value] of Object.entries(stackOutputs)) {
   for (const { match, env, transform } of mapping) {
     if (outputKey.startsWith(match)) {

@@ -15,6 +15,17 @@ These properties in details are as follows.
 
 ## Webapp Custom Domain
 
+## Generated Frontend Env
+
+Run `npm run generateEnv` after backend deploy. It writes `app/web/.env` from `cdk-infra.json` outputs.
+
+- `VITE_APP_NAME` — deployment prefix used by monitoring SSM paths (for example, `pr-mucker`)
+- `VITE_COGNITO_USERPOOLID`
+- `VITE_COGNITO_USERPOLL_CLIENTID`
+- `VITE_COGNITO_IDENTITYPOOLID`
+- `VITE_COGNITO_REGION`
+- `VITE_GRAPHQL_URL`
+
 When `webDomainNames` is non-empty, the `WebappStack` will:
 
 1. Look up the Route 53 hosted zone identified by `domainName` (must exist — created by `DnsStack`).
