@@ -17,6 +17,7 @@ Roles are defined as Cognito groups in [`lib/constructs/cognito.ts`](../lib/cons
 The bootstrap admin is created with a Cognito username derived from the local part of `adminEmail` (for example, `John` for `john@e-mail.com`).
 
 The sign-in form accepts email aliases, and the password reset flow now attempts both the full email and local username so reset works for bootstrap users and self-registered users.
+After requesting a reset, the UI now shows the delivery channel and masked destination reported by Cognito (for example, `EMAIL` to `p***@s***` or `SMS` to `+*******1234`).
 
 ## API Authorization
 

@@ -19,6 +19,14 @@ import type { AppRole } from "@/store/useAuthStore";
 
 interface UserAuthFormProps extends React.HTMLAttributes<HTMLDivElement> {}
 
+function isUserNotFoundError(error: unknown): boolean {
+  const candidate = error as { name?: string; code?: string };
+  return (
+    candidate?.name === "UserNotFoundException" ||
+    candidate?.code === "UserNotFoundException"
+  );
+}
+
 function getUsernameCandidates(rawValue: string): string[] {
   const value = rawValue.trim();
   if (!value) {
@@ -140,14 +148,32 @@ export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
       const candidates = getUsernameCandidates(refEmail.current!.value);
       let resolvedUsername = "";
       let lastError: unknown;
+      let deliveryDetails:
+        | {
+            destination?: string;
+            deliveryMedium?: string;
+          }
+        | undefined;
 
-      for (const candidate of candidates) {
+      for (const [index, candidate] of candidates.entries()) {
         try {
-          await resetPassword({ username: candidate });
+          const result = await resetPassword({ username: candidate });
+          // Expose where Cognito delivered the reset code (email vs SMS).
+          deliveryDetails = {
+            destination: result.nextStep.codeDeliveryDetails?.destination,
+            deliveryMedium: result.nextStep.codeDeliveryDetails?.deliveryMedium,
+          };
           resolvedUsername = candidate;
           break;
         } catch (error) {
           lastError = error;
+          // Only fallback from full email -> local username when Cognito
+          // explicitly says user was not found. For all other errors we stop
+          // immediately so real issues are surfaced instead of masked.
+          const hasFallback = index < candidates.length - 1;
+          if (!hasFallback || !isUserNotFoundError(error)) {
+            break;
+          }
         }
       }
 
@@ -159,6 +185,12 @@ export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
       setIsLoading(false);
       setResetEmail(resolvedUsername);
       setIsRecoveryOpen(!isRecoveryOpen);
+      const medium = deliveryDetails?.deliveryMedium ?? "UNKNOWN";
+      const destination = deliveryDetails?.destination ?? "your recovery destination";
+      toast({
+        title: "Reset code sent",
+        description: `A reset code was sent via ${medium} to ${destination}.`,
+      });
     } catch (error) {
       setIsLoading(false);
       const errorMessage = error as ErrorMessage;
@@ -178,7 +210,7 @@ export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
       let lastError: unknown;
       let isConfirmed = false;
 
-      for (const candidate of candidates) {
+      for (const [index, candidate] of candidates.entries()) {
         try {
           await confirmResetPassword({
             username: candidate,
@@ -189,6 +221,10 @@ export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
           break;
         } catch (error) {
           lastError = error;
+          const hasFallback = index < candidates.length - 1;
+          if (!hasFallback || !isUserNotFoundError(error)) {
+            break;
+          }
         }
       }
 
