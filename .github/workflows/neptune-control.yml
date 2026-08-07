@@ -144,16 +144,35 @@ jobs:
       - name: Get bastion instance ID from SSM
         id: ssm
         run: |
-          INSTANCE_ID=$(aws ssm get-parameter \
-            --name /socialActiveApp/bastion/instance-id \
-            --query "Parameter.Value" \
-            --output text --region ${{ env.AWS_REGION }})
+          export AWS_PAGER=""
+
+          INSTANCE_ID=""
+          PARAM_NAME=""
+          for CANDIDATE in \
+            "/socialActiveApp/bastion/instance-id" \
+            "/dev-socialactiveapp/bastion/instance-id" \
+            "/qa-socialactiveapp/bastion/instance-id" \
+            "/pr-socialactiveapp/bastion/instance-id"; do
+            VALUE=$(aws ssm get-parameter \
+              --name "$CANDIDATE" \
+              --query "Parameter.Value" \
+              --output text \
+              --region ${{ env.AWS_REGION }} \
+              --no-cli-pager 2>/dev/null || true)
+            if [ -n "$VALUE" ] && [ "$VALUE" != "None" ]; then
+              INSTANCE_ID="$VALUE"
+              PARAM_NAME="$CANDIDATE"
+              break
+            fi
+          done
+
           if [ -z "$INSTANCE_ID" ]; then
-            echo "::error::Bastion instance ID not found in SSM parameter /socialActiveApp/bastion/instance-id"
+            echo "::error::Bastion instance ID not found in expected SSM paths (/socialActiveApp|/dev-socialactiveapp|/qa-socialactiveapp|/pr-socialactiveapp)/bastion/instance-id"
             exit 1
           fi
           echo "instance-id=$INSTANCE_ID" >> $GITHUB_OUTPUT
-          echo "Bastion instance ID from SSM: $INSTANCE_ID"
+          echo "ssm-param-name=$PARAM_NAME" >> $GITHUB_OUTPUT
+          echo "Bastion instance ID from SSM ($PARAM_NAME): $INSTANCE_ID"
 
       - name: Get current bastion status
         id: before-status
