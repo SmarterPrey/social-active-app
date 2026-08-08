@@ -10,13 +10,13 @@ importers:
     dependencies:
       '@aws-cdk/aws-neptune-alpha':
         specifier: ^2.248.0-alpha.0
-        version: 2.248.0-alpha.0(aws-cdk-lib@2.258.1(constructs@10.6.0))(constructs@10.6.0)
+        version: 2.248.0-alpha.0(aws-cdk-lib@2.263.0(constructs@10.6.0))(constructs@10.6.0)
       aws-cdk-lib:
-        specifier: ^2.258.1
-        version: 2.258.1(constructs@10.6.0)
+        specifier: ^2.260.0
+        version: 2.263.0(constructs@10.6.0)
       cdk-nag:
         specifier: ^2.28.100
-        version: 2.38.2(aws-cdk-lib@2.258.1(constructs@10.6.0))(constructs@10.6.0)
+        version: 2.38.2(aws-cdk-lib@2.263.0(constructs@10.6.0))(constructs@10.6.0)
       constructs:
         specifier: ^10.0.0
         version: 10.6.0
@@ -27,8 +27,8 @@ importers:
         specifier: ^4.17.23
         version: 4.18.1
       pnpm:
-        specifier: ^10.28.2
-        version: 10.34.2
+        specifier: ^10.34.4
+        version: 10.34.5
       source-map-support:
         specifier: ^0.5.21
         version: 0.5.21
@@ -85,7 +85,7 @@ importers:
         specifier: 20.12.7
         version: 20.12.7
       aws-cdk:
-        specifier: ^2.1117.0
+        specifier: ^2.260.0
         version: 2.1126.0
       dotenv:
         specifier: ^17.4.2
@@ -124,8 +124,8 @@ packages:
       aws-cdk-lib: ^2.248.0
       constructs: ^10.5.0
 
-  '@aws-cdk/cloud-assembly-schema@54.2.0':
-    resolution: {integrity: sha512-u3lFXmiXSBozxGBmKTCVD/2mTDsaXzLZH3KYiIQKcB+zPldXOeE5TnooBgKV9ih2jVTo8ML0HpkhfAq2eiv0eQ==}
+  '@aws-cdk/cloud-assembly-schema@54.17.0':
+    resolution: {integrity: sha512-wV1GmMM5AvDkiJIenb9aJcBiGTa5KwX/C/mIjFZCsWsB5b1rEMLnwMageqrOpL2mWKicpxqS8ofF/Yte4Lm3Dg==}
     engines: {node: '>= 18.0.0'}
     bundledDependencies:
       - jsonschema
@@ -858,12 +858,13 @@ packages:
   argparse@1.0.10:
     resolution: {integrity: sha512-o5Roy6tNG4SL/FOkCAN6RzjiakZS25RLYFrcMttJqbdd8BWrnA+fGz57iN5Pb06pvBGvl5gQ0B48dJlslXvoTg==}
 
-  aws-cdk-lib@2.258.1:
-    resolution: {integrity: sha512-isYgP0GASgTY99J3753iN6SLP05wEuinToE+p+Yat0d5Xi55iOtd5HFzBBklOb77FO5R3pikY6r9qaRSZUAwWA==}
+  aws-cdk-lib@2.263.0:
+    resolution: {integrity: sha512-cXC9wnOr+LknMee9x0kYwofgVs8aN8eBKsbzcE90sDUtpLTgWG2Bd+9koqxBKPeIU8kig/GGBFwJ69Wr+hLKDg==}
     engines: {node: '>= 20.0.0'}
     peerDependencies:
       constructs: ^10.5.0
     bundledDependencies:
+      - '@aws/cloudformation-validate'
       - '@balena/dockerignore'
       - '@aws-cdk/cloud-assembly-api'
       - case
@@ -873,7 +874,6 @@ packages:
       - minimatch
       - punycode
       - semver
-      - table
       - yaml
       - mime-types
 
@@ -1556,8 +1556,8 @@ packages:
     resolution: {integrity: sha512-HRDzbaKjC+AOWVXxAU/x54COGeIv9eb+6CkDSQoNTt4XyWoIJvuPsXizxu/Fr23EiekbtZwmh1IcIG/l/a10GQ==}
     engines: {node: '>=8'}
 
-  pnpm@10.34.2:
-    resolution: {integrity: sha512-mufj/kd8UrvOHdyKoZb/JD7UtI8c6qdFWCCt+npItfV+gX7S0g5fPCw2Rt/tujYFZ2k+U0Vy3M0lL7Lri3wETA==}
+  pnpm@10.34.5:
+    resolution: {integrity: sha512-pO4F8vc2WCVb1qiYWcBlpFwopX2u+uLIk6Fo7itzFow3uR6D5X6mdlStA/AwMXRkMOi84442LgQmBfuKvIAZLg==}
     engines: {node: '>=18.12'}
     hasBin: true
 
@@ -1858,12 +1858,12 @@ snapshots:
 
   '@aws-cdk/asset-node-proxy-agent-v6@2.1.2': {}
 
-  '@aws-cdk/aws-neptune-alpha@2.248.0-alpha.0(aws-cdk-lib@2.258.1(constructs@10.6.0))(constructs@10.6.0)':
+  '@aws-cdk/aws-neptune-alpha@2.248.0-alpha.0(aws-cdk-lib@2.263.0(constructs@10.6.0))(constructs@10.6.0)':
     dependencies:
-      aws-cdk-lib: 2.258.1(constructs@10.6.0)
+      aws-cdk-lib: 2.263.0(constructs@10.6.0)
       constructs: 10.6.0
 
-  '@aws-cdk/cloud-assembly-schema@54.2.0': {}
+  '@aws-cdk/cloud-assembly-schema@54.17.0': {}
 
   '@aws-crypto/crc32@5.2.0':
     dependencies:
@@ -2871,11 +2871,11 @@ snapshots:
     dependencies:
       sprintf-js: 1.0.3
 
-  aws-cdk-lib@2.258.1(constructs@10.6.0):
+  aws-cdk-lib@2.263.0(constructs@10.6.0):
     dependencies:
       '@aws-cdk/asset-awscli-v1': 2.2.282
       '@aws-cdk/asset-node-proxy-agent-v6': 2.1.2
-      '@aws-cdk/cloud-assembly-schema': 54.2.0
+      '@aws-cdk/cloud-assembly-schema': 54.17.0
       constructs: 10.6.0
 
   aws-cdk@2.1126.0: {}
@@ -2985,9 +2985,9 @@ snapshots:
 
   caniuse-lite@1.0.30001797: {}
 
-  cdk-nag@2.38.2(aws-cdk-lib@2.258.1(constructs@10.6.0))(constructs@10.6.0):
+  cdk-nag@2.38.2(aws-cdk-lib@2.263.0(constructs@10.6.0))(constructs@10.6.0):
     dependencies:
-      aws-cdk-lib: 2.258.1(constructs@10.6.0)
+      aws-cdk-lib: 2.263.0(constructs@10.6.0)
       constructs: 10.6.0
 
   chalk@4.1.2:
@@ -3733,7 +3733,7 @@ snapshots:
     dependencies:
       find-up: 4.1.0
 
-  pnpm@10.34.2: {}
+  pnpm@10.34.5: {}
 
   pretty-format@29.7.0:
     dependencies:
